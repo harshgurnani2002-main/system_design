@@ -75,13 +75,34 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
             aria-label="Search query"
           />
+          {q && (
+            <button
+              onClick={() => {
+                setQ("");
+                inputRef.current?.focus();
+              }}
+              className="rounded p-1 text-ink-mute hover:bg-zinc-100 hover:text-ink"
+              aria-label="Clear search input"
+            >
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
           <kbd className="rounded border border-line bg-zinc-50 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">esc</kbd>
         </div>
 
         <div ref={listRef} className="max-h-[52vh] overflow-y-auto p-2" role="listbox">
           {q && flat.length === 0 && (
-            <div className="px-3 py-8 text-center text-sm text-ink-mute">
-              No results for &ldquo;{q}&rdquo;. Try a concept like <em>quorum</em>, a tech like <em>redis</em>, or a system like <em>instagram</em>.
+            <div className="px-3 py-8 text-center text-sm text-ink-mute space-y-3" role="status" aria-live="polite">
+              <p>No results found for &ldquo;<strong>{q}</strong>&rdquo;.</p>
+              <p className="text-xs text-ink-faint">Try searching for concepts like <em>quorum</em>, <em>cache-aside</em>, technologies like <em>redis</em>, <em>kafka</em>, or architectures like <em>instagram</em>.</p>
+              <button
+                onClick={() => setQ("")}
+                className="mt-2 inline-flex items-center rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-accent hover:text-accent transition-colors"
+              >
+                Clear search query
+              </button>
             </div>
           )}
           {!q && (

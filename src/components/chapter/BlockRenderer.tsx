@@ -19,9 +19,9 @@ export function BlockRenderer({ block }: { block: Block }) {
       );
     case "h":
       return (
-        <h3 className="mt-10 border-b border-line-soft pb-2 text-lg font-semibold tracking-tight text-ink first:mt-0">
+        <h2 className="mt-10 border-b border-line-soft pb-2 text-xl font-semibold tracking-tight text-ink first:mt-0">
           {block.text}
-        </h3>
+        </h2>
       );
     case "list":
       return block.ordered ? (
@@ -130,14 +130,31 @@ function SimMount({ sim }: { sim: string }) {
   }
 }
 
-/** Inline markdown: **bold**, `code` */
+/** Inline markdown: **bold**, *italic*, `code`, [label](url) */
 export function Inline({ md }: { md: string }) {
-  const parts = useMemo(() => md.split(/(\*\*[^*]+\*\*|`[^`]+`)/g), [md]);
+  const parts = useMemo(() => md.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g), [md]);
   return (
     <>
       {parts.map((p, i) => {
         if (p.startsWith("**") && p.endsWith("**")) return <strong key={i}>{p.slice(2, -2)}</strong>;
+        if (p.startsWith("*") && p.endsWith("*")) return <em key={i}>{p.slice(1, -1)}</em>;
         if (p.startsWith("`") && p.endsWith("`")) return <code key={i}>{p.slice(1, -1)}</code>;
+        const linkMatch = p.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (linkMatch) {
+          const [, label, href] = linkMatch;
+          const isExternal = href.startsWith("http://") || href.startsWith("https://");
+          return (
+            <a
+              key={i}
+              href={href}
+              target={isExternal ? "_blank" : undefined}
+              rel={isExternal ? "noopener noreferrer" : undefined}
+              className="text-accent underline underline-offset-2 hover:text-accent-hover"
+            >
+              {label}
+            </a>
+          );
+        }
         return <span key={i}>{p}</span>;
       })}
     </>

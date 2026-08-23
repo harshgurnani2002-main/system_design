@@ -459,4 +459,84 @@ export const INTERVIEW_QUESTIONS: InterviewQuestion[] = [
       "Chose and justified delivery semantics",
     ],
   },
+  {
+    slug: "video-streaming",
+    title: "Design Netflix / Video Streaming Platform",
+    difficulty: "Hard",
+    minutes: 45,
+    summary:
+      "Global video-on-demand platform serving 200M+ active subscribers: chunked parallel transcoding, adaptive bitrate streaming (HLS/DASH), ISP-embedded edge CDNs (Open Connect), and DRM licensing.",
+    requirements: {
+      functional: [
+        "Upload and transcode high-resolution master video files into multiple bitrates & resolutions (1080p, 4K, HDR, mobile)",
+        "Smooth, uninterrupted video playback with adaptive bitrate switching (ABR) based on network conditions",
+        "Playback telemetry: resume position, viewing history, device bookmarks",
+        "Content catalog search, recommendations, and DRM license enforcement (Widevine / FairPlay)",
+      ],
+      nonFunctional: [
+        "Low startup latency (<1s time-to-first-frame)",
+        "Zero mid-stream buffering stalls (<0.1% buffer ratio)",
+        "Massive global throughput: support 50M concurrent streams and >200 Tbps peak egress",
+        "Cost efficiency: avoid origin egress fees through multi-tier ISP-level edge caching",
+      ],
+    },
+    estimation: [
+      { label: "Active Viewers", value: "50M peak concurrent streams" },
+      { label: "Bandwidth", value: "Avg 5 Mbps (1080p) × 50M = 250 Terabits/sec peak egress" },
+      { label: "Master Storage", value: "10K titles/yr × 50GB mezzanine + 20 encoded profiles = 5 Petabytes/yr" },
+      { label: "Chunk Size", value: "2–6 second media segments (.ts / .m4s) indexed via .m3u8 manifest" },
+    ],
+    architectureNotes: [
+      "Decouple the control plane (user auth, catalog search, recommendations on AWS microservices + Cassandra/DynamoDB) from the data plane (video file delivery on ISP-embedded Open Connect appliances).",
+      "Ingestion & Transcoding Pipeline: Master video files uploaded to S3 are split into micro-chunks (GOP-aligned). A distributed DAG worker fleet transcodes chunks in parallel across codec profiles (H.264, HEVC, AV1) before assembling master manifests.",
+      "Adaptive Bitrate Streaming (HLS & MPEG-DASH): The video player constantly samples bandwidth and buffer health, requesting higher or lower bitrate chunks chunk-by-chunk over standard HTTP/2 or HTTP/3.",
+      "Edge CDN Delivery: Over 95% of traffic is served directly from custom caching appliances (OCAs) placed inside ISP data centers, bypassing transit networks entirely during peak hours.",
+      "DRM Key Exchange: Encrypted video chunks are decrypted in the client's hardware Secure Enclave using DRM licenses fetched from an authenticated Key Management Service.",
+    ],
+    deepDives: [
+      {
+        topic: "Chunk-Level Parallel Transcoding DAG",
+        points: [
+          "Monolithic file transcoding on a single worker takes hours and fails completely on worker crash.",
+          "Split master video at Group of Pictures (GOP / Keyframe) boundaries into 5-minute chunks.",
+          "Step Functions / Temporal coordinates worker tasks across Spot instances; failed chunk tasks retry independently in seconds.",
+          "Post-processing stitches per-chunk VMAF (Video Multi-Method Assessment Fusion) scores to pick optimal bitrate curves without wasting bandwidth on static scenes.",
+        ],
+      },
+      {
+        topic: "Adaptive Bitrate (ABR) Logic & Player Buffering",
+        points: [
+          "Traditional throughput-based ABR oscillates rapidly on fluctuating cellular networks.",
+          "Modern players use BOLA (Buffer-Occupancy-based Lyapunov Algorithm) or hybrid MPC (Model Predictive Control).",
+          "Player maintains a 30–60 second forward buffer; switches down preemptively when buffer drain rate exceeds fill rate.",
+        ],
+      },
+      {
+        topic: "Open Connect ISP Edge Caching Topology",
+        points: [
+          "Origin S3 $\\to$ Regional Mid-Tier Caches $\\to$ ISP Edge Appliances (embedded directly in IXPs and ISP racks).",
+          "Nighttime proactive cache filling: Push anticipated popular titles to ISP caches during off-peak hours (2 AM–6 AM) based on local viewing predictions, so peak evening traffic hits cache 98%+ of the time.",
+        ],
+      },
+    ],
+    tradeoffs: [
+      ["Video Transport", "HTTP Chunked (HLS / DASH)", "Stateful Sockets (RTMP / WebRTC)"],
+      ["CDN Architecture", "Custom ISP Appliances (Open Connect)", "Commercial CDNs (Cloudflare / Fastly)"],
+      ["Transcoding Scheduling", "Pre-computed full library profiles", "Just-In-Time (JIT) on-demand transcode"],
+    ],
+    failureHandling: [
+      "ISP Edge Appliance fails $\\to$ DNS / BGP Anycast automatically fails over to neighboring regional POP.",
+      "DRM Key Service degraded $\\to$ Cache short-lived playback tokens on client; gracefully degrade to non-4K stream.",
+      "Network throttle on user device $\\to$ Player dynamically steps down resolution without breaking audio or stopping stream.",
+      "Manifest CDN cache corruption $\\to$ Versioned manifest URLs (`/v2/manifest.m3u8`) bypass poisoned cache headers.",
+    ],
+    checklist: [
+      "Separated Control Plane (APIs/metadata) from Data Plane (video delivery)",
+      "Calculated concurrent streams, bandwidth egress (Tbps), and chunk sizes",
+      "Explained HLS / MPEG-DASH chunking and Adaptive Bitrate (ABR) algorithm",
+      "Designed scalable distributed transcoding pipeline with GOP alignment",
+      "Articulated multi-tier CDN caching and ISP-level Open Connect strategy",
+      "Covered DRM security licensing, viewing telemetry, and resilient failovers",
+    ],
+  },
 ];

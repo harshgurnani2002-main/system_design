@@ -191,19 +191,22 @@ export const scaleChapters: Chapter[] = [
       {
         t: "code",
         lang: "text",
-        title: "Circuit breaker lifecycle",
-        code: `CLOSED ── failures ≥ threshold ──▶ OPEN
-   ▲                                │
-   │ probe succeeds                 │ after cooldown
-   │                                ▼
-HALF-CLOSED ◀────── allow ONE trial request
-
-While OPEN: fail immediately (no queueing),
-serve fallback, emit metric breaker_state=1`,
+        title: "Circuit breaker lifecycle (Closed → Open → Half-Open canary)",
+        code: `CLOSED ──────── failures ≥ threshold ────────▶ OPEN
+   ▲                                             │
+   │                                             │ after cooldown
+   │ canary succeeds                             ▼
+   └──────────────── HALF-OPEN ◀─────────────────┘
+                  (strictly 1 canary probe)
+                     │
+                     │ canary fails
+                     ▼
+                    OPEN (reset cooldown)`,
       },
       {
         t: "list",
         items: [
+          "**Half-Open Canary Throttling:** When the cooldown expires, the breaker transitions to `HALF-OPEN` and permits only a single canary probe (or tightly bounded semaphore). It does NOT open the gates to thousands of pending requests, which would instantly re-crash a struggling dependency.",
           "**Bulkhead:** separate connection pools/thread pools per dependency. Recommendation service dying must not consume checkout's threads.",
           "**Load shedding:** when overloaded, reject lowest-priority work early with clear errors instead of accepting everything and timing out everyone.",
           "**Graceful degradation:** design fallbacks per feature — cached recommendations, default avatars, disabled sorting. The page renders; some sections say 'temporarily unavailable'.",
@@ -346,9 +349,10 @@ or a guarantee it cannot fail after commit.`,
       {
         t: "list",
         items: [
-          "**Transactional outbox** (see Kafka chapter): state change and event commit atomically in the service's own DB; relay publishes.",
-          "**Inbox table:** consumers record processed message IDs in their own DB within the same transaction as their side effects. Duplicate delivery becomes a no-op lookup.",
-          "Together they give the **exactly-once illusion** across services — built from at-least-once transport plus idempotent effects. This is how serious payment systems actually work.",
+          "**Transactional Outbox:** Write business data and the event payload into an `outbox` table in the *same local database transaction*. No dual-write inconsistency.",
+          "**Outbox Relay: Polling vs. CDC:** A background relay process publishes outbox events to Kafka. Choose between **Polling Publisher** (periodic `SELECT ... FOR UPDATE SKIP LOCKED`, simple but adds DB read load) or **Transaction Log Tailing / CDC** (Debezium reading PostgreSQL WAL / MySQL binlog directly, with zero DB query overhead and sub-millisecond latency).",
+          "**Inbox Table (Consumer Idempotency):** The consumer stores incoming message IDs in its local database within the transaction that executes the business side effect. Duplicate deliveries result in unique constraint skips.",
+          "Together they provide the **effective exactly-once illusion** across distributed microservices.",
         ],
       },
       { t: "h", text: "CQRS: different models for writing and reading" },

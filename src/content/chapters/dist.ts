@@ -16,19 +16,19 @@ export const distChapters: Chapter[] = [
         t: "p",
         md: "A single machine is honest: it sees every operation in order, and when it dies, everything stops cleanly. Distribute state across machines and you inherit three new physics: **messages get lost or delayed**, **nodes crash at arbitrary moments**, and **there is no shared clock**. Distributed systems is the discipline of building correct behavior on top of those facts.",
       },
-      { t: "h", text: "CAP and its fine print" },
+      { t: "h", text: "CAP and PACELC: The Real Physics" },
       {
         t: "diagram",
         height: 250,
         caption:
-          "A partition splits the cluster. Choosing C rejects writes on the minority side; choosing A accepts them and diverges data.",
+          "Partitions are physically inevitable. When a partition occurs: CP rejects writes on the minority to prevent split-brain; AP accepts writes locally and reconciles later.",
         graph: {
           nodes: [
             { id: "c1", label: "Client A", kind: "client", x: 20, y: 30 },
-            { id: "n1", label: "Node 1", sub: "accepts writes", kind: "data", x: 230, y: 30 },
-            { id: "n2", label: "Node 2", sub: "unreachable", kind: "data", x: 560, y: 30, state: "down" },
+            { id: "n1", label: "Node 1 (Leader)", sub: "accepts writes", kind: "data", x: 230, y: 30 },
+            { id: "n2", label: "Node 2 (Follower)", sub: "unreachable", kind: "data", x: 560, y: 30, state: "down" },
             { id: "c2", label: "Client B", kind: "client", x: 790, y: 30 },
-            { id: "n3", label: "Node 3", sub: "minority side", kind: "data", x: 560, y: 150 },
+            { id: "n3", label: "Node 3 (Follower)", sub: "minority side", kind: "data", x: 560, y: 150 },
             { id: "x", label: "✕ network cut", kind: "infra", x: 395, y: 95 },
           ],
           edges: [
@@ -40,18 +40,24 @@ export const distChapters: Chapter[] = [
         },
       },
       {
+        t: "callout",
+        kind: "warn",
+        title: "The 'Pick Any 2' Myth",
+        md: "Interviewers often say 'CAP means pick 2 of Consistency, Availability, Partition Tolerance'. **This is a dangerous oversimplification.**\n\nIn the real physical world, network partitions ($P$) cannot be chosen away — cables get cut, switches drop packets, and GC pauses delay heartbeats. You cannot build a 'CA' system across a network because you cannot forbid partitions.\n\nTherefore, CAP is really: **When a Partition ($P$) occurs, do you choose Consistency ($CP$) or Availability ($AP$)?**\n* **$CP$ (e.g., Raft, etcd, PostgreSQL synchronous primary):** Reject writes or time out on minority partitions to guarantee zero stale reads or split-brain.\n* **$AP$ (e.g., Cassandra, DynamoDB eventual consistency, DNS):** Continue accepting writes on both sides, allowing data divergence that must be merged later via CRDTs or vector clocks.",
+      },
+      {
         t: "p",
-        md: "**CAP:** under a network partition you choose Consistency (reject operations that can't be replicated) or Availability (serve locally and reconcile later). The fine print everyone misses: partitions are rare, so CAP governs a small slice of life. **PACELC** completes the picture — *else*, even without partitions, you trade **L**atency against **C**onsistency. Waiting for quorum agreement is slower than answering from one node. Every replicated store is a point on this spectrum.",
+        md: "**PACELC Theorem** (Daniel Abadi) extends CAP to cover normal operation: **I**f **P**artition $\\to$ trade **A**vailability vs **C**onsistency; **E**lse $\\to$ trade **L**atency vs **C**onsistency. Even when the network is 100% healthy, replicating synchronously to multiple quorum nodes incurs network round-trip latency. You must trade how fast you answer against how strictly consistent you guarantee the read.",
       },
       { t: "h", text: "Consistency models, ranked by strength" },
       {
         t: "table",
         head: ["Model", "Guarantee", "Example"],
         rows: [
-          ["Linearizability", "Every op appears atomic, in real time, as if one machine", "ZooKeeper etcd; bank balances"],
+          ["Linearizability", "Every op appears atomic, in real time, as if one machine", "ZooKeeper, etcd; Spanner; bank balances"],
           ["Sequential", "Ops appear in some global order matching each process's order", "Single leader DB reads from primary"],
-          ["Causal", "Effects visible after causes; concurrent ops may reorder", "Comments showing reply after parent"],
-          ["Eventual", "Replicas converge if writes stop", "DNS, Cassandra default, like counts"],
+          ["Causal", "Effects visible after causes; concurrent ops may reorder", "Comments showing reply after parent post"],
+          ["Eventual", "Replicas converge if writes stop", "DNS, Cassandra default, social media like counts"],
         ],
       },
       {
@@ -136,7 +142,7 @@ Sloppy quorums + hinted handoff → stay available during node loss (Dynamo)`,
           "**Timeouts** — the only way to distinguish 'slow' from 'dead'. Derive from measured p99.9, not folklore.",
           "**Retries with exponential backoff + jitter** — `delay = min(cap, base × 2^attempt)` plus randomness. Jitter prevents synchronized retry waves (the thundering herd). Cap total attempts; make retries visible in metrics.",
           "**Idempotency keys** — retries are only safe if repeating has no extra effect. Pass a client-generated key; server dedupes.",
-          "**Circuit breaker** — after N consecutive failures, fail fast locally for a cool-down instead of queuing more victims. Three states: closed → open → half-open probe.",
+          "**Circuit breaker (Closed / Open / Half-Open)** — after N consecutive failures, fail fast locally for a cool-down. During Half-Open, admit a throttled single trial probe before full recovery.",
           "**Bulkhead** — isolate resource pools per dependency so one drowning integration can't drain the whole ship.",
           "**Hedged requests** — send a duplicate to another replica at p95; cuts tail latency when duplicates are safe (read-only work).",
         ],
@@ -144,28 +150,62 @@ Sloppy quorums + hinted handoff → stay available during node loss (Dynamo)`,
       {
         t: "code",
         lang: "python",
-        title: "Retry with backoff + jitter + circuit breaker",
+        title: "Retry with backoff + jitter + 3-state Circuit Breaker",
         code: `import random, time
+from enum import Enum
 
-def call_with_retry(fn, *, attempts=4, base=0.05, cap=1.0):
-    for i in range(attempts):
-        try:
-            return fn()
-        except TransientError:
-            if i == attempts - 1:
-                raise
-            delay = min(cap, base * 2 ** i)
-            time.sleep(random.uniform(0, delay))   # full jitter
+class BreakerState(Enum):
+    CLOSED = "CLOSED"       # Healthy: all traffic allowed
+    OPEN = "OPEN"           # Broken: fail fast locally, no downstream traffic
+    HALF_OPEN = "HALF_OPEN" # Canary trial probe: allow strictly 1 test request
 
-class Breaker:
-    def __init__(self, threshold=5, cooldown=10):
-        self.failures, self.open_until = 0, 0
-    def allow(self):
-        return time.monotonic() >= self.open_until
-    def record(self, ok):
-        self.failures = 0 if ok else self.failures + 1
-        if self.failures >= 5:
-            self.open_until = time.monotonic() + 10`,
+class CircuitBreaker:
+    def __init__(self, failure_threshold=5, recovery_timeout=15.0):
+        self.state = BreakerState.CLOSED
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_state_change = time.monotonic()
+        self.canary_in_flight = False
+
+    def allow_request(self) -> bool:
+        now = time.monotonic()
+        if self.state == BreakerState.OPEN:
+            if now - self.last_state_change >= self.recovery_timeout:
+                self.state = BreakerState.HALF_OPEN
+                self.canary_in_flight = False
+                self.last_state_change = now
+            else:
+                return False  # Fail fast immediately
+
+        if self.state == BreakerState.HALF_OPEN:
+            # Throttled canary: admit only 1 probe request at a time
+            if not self.canary_in_flight:
+                self.canary_in_flight = True
+                return True
+            return False  # Reject concurrent traffic while testing canary
+
+        return True  # CLOSED state: normal flow
+
+    def record_success(self):
+        if self.state == BreakerState.HALF_OPEN:
+            self.state = BreakerState.CLOSED
+            self.canary_in_flight = False
+            self.failure_count = 0
+            self.last_state_change = time.monotonic()
+        elif self.state == BreakerState.CLOSED:
+            self.failure_count = 0
+
+    def record_failure(self):
+        self.last_state_change = time.monotonic()
+        if self.state == BreakerState.HALF_OPEN:
+            # Canary probe failed: immediately re-trip back to OPEN
+            self.state = BreakerState.OPEN
+            self.canary_in_flight = False
+        elif self.state == BreakerState.CLOSED:
+            self.failure_count += 1
+            if self.failure_count >= self.failure_threshold:
+                self.state = BreakerState.OPEN`,
       },
     ],
     quiz: [

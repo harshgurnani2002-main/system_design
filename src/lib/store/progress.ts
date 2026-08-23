@@ -72,7 +72,24 @@ export const useProgress = create<ProgressState>()(
       markVisited: (id) =>
         set((s) => ({ visited: { ...s.visited, [id]: Date.now() } })),
     }),
-    { name: "sda-progress-v1" }
+    {
+      name: "sda-progress-v1",
+      onRehydrateStorage: () => () => {
+        // Cross-tab synchronization listener
+        if (typeof window !== "undefined") {
+          window.addEventListener("storage", (e) => {
+            if (e.key === "sda-progress-v1" && e.newValue) {
+              try {
+                const parsed = JSON.parse(e.newValue);
+                if (parsed?.state) {
+                  useProgress.setState(parsed.state);
+                }
+              } catch {}
+            }
+          });
+        }
+      },
+    }
   )
 );
 

@@ -135,8 +135,8 @@ SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC LIMIT 20;
       {
         t: "callout",
         kind: "warn",
-        title: "The sharding decision tree",
-        md: "Shard ONLY when: writes exceed vertical capacity AND caching/replicas/partitioning are exhausted AND the business accepts cross-shard complexity. Choose a shard key matching your dominant access pattern (tenant_id, user_id) — one that makes most queries single-shard. Resharding later is a months-long project; choose like it's permanent, because it is.",
+        title: "The Hidden Costs of Sharding",
+        md: "Never shard early. Sharding is an architectural one-way door with severe operational taxes:\n\n1. **Cross-Shard Joins (Scatter-Gather):** A query needing data from multiple shards must query all shards in parallel and merge in app memory, turning a 5ms index lookup into a 150ms tail-latency bottleneck.\n2. **Distributed Transactions (2PC):** Atomic writes spanning shards require Two-Phase Commit, introducing coordinator failure risks, blocking row locks, and 10× higher write latency.\n3. **Re-Sharding & Data Migration:** When shards fill up, rebalancing data requires consistent hashing with virtual nodes, dual-writing, backfilling, and cutover validation.\n4. **Non-Shard-Key Queries:** Querying by secondary attributes requires global lookup tables or broadcasting to every shard.",
       },
       {
         t: "callout",
@@ -246,41 +246,50 @@ SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC LIMIT 20;
           "**Offsets** — consumers commit their position. Replay from anywhere: reprocess yesterday, rebuild a downstream store, audit history.",
         ],
       },
-      { t: "h", text: "Delivery semantics: the honest table" },
+      { t: "h", text: "Delivery semantics: the honest breakdown" },
       {
         t: "table",
-        head: ["Semantics", "How", "Reality"],
+        head: ["Semantics", "How", "Scope & Reality"],
         rows: [
-          ["At-most-once", "Commit offset before processing", "Crash loses messages — fine for metrics"],
-          ["At-least-once", "Process, then commit", "Default setup; duplicates WILL happen → make handlers idempotent"],
-          ["Exactly-once", "Idempotent producer + transactions / consume-transform-produce", "Within Kafka pipelines only; end-to-end still needs idempotent sinks"],
+          ["At-most-once", "Commit offset before processing message", "Crash drops messages — acceptable only for non-critical telemetry/metrics"],
+          ["At-least-once", "Process message, then commit offset", "Default production standard; duplicates happen on failure → handlers must be idempotent"],
+          ["Idempotent Producer", "enable.idempotence=true (PID + Sequence numbers)", "Guarantees deduplication within a single producer session to a single partition"],
+          ["Kafka Transactions (EOS)", "Transactional Producer API (read-process-write loop)", "Guarantees atomic cross-partition and offset commits within Kafka pipelines"],
         ],
       },
       {
         t: "callout",
         kind: "warn",
-        title: "'Exactly-once' is a marketing term",
-        md: "Kafka transactions make produce+commit atomic inside Kafka. But the moment a consumer writes to Postgres and dies before committing its offset, you have processed twice. The industry truth: **systems are effectively-once because side effects are idempotent**, not because a checkbox exists. Design every consumer to survive duplicate delivery — dedupe keys, upserts, conditional writes.",
+        title: "End-to-End Exactly-Once: The Honest Reality",
+        md: "Setting `enable.idempotence=true` and `acks=all` on a producer does NOT magically give you end-to-end exactly-once delivery across your entire microservices fleet.\n\n* **Within Kafka:** Kafka's Transaction Coordinator provides atomic write-and-offset commits across topics using `initTransactions()`, `beginTransaction()`, `sendOffsetsToTransaction()`, and `commitTransaction()`.\n* **End-to-End with External Sinks (Postgres, S3, Stripe):** The moment a consumer writes to an external DB and crashes before committing its Kafka offset, the message will be re-delivered on restart!\n* **The Industry Truth:** Systems achieve **effective exactly-once processing** because downstream side-effects are made **idempotent** (unique constraint upserts, deduplication tables, idempotency keys), not because of transport-layer magic.",
       },
-      { t: "h", text: "The patterns that matter" },
+      { t: "h", text: "Transactional Outbox: Polling vs CDC Log Tailing" },
+      {
+        t: "table",
+        head: ["Relay Strategy", "Mechanism", "Trade-offs"],
+        rows: [
+          ["Polling Publisher", "Background cron runs SELECT * FROM outbox WHERE sent=false ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED", "Simple to implement; polling adds DB query load, lock contention, and 500ms–2s latency window"],
+          ["Transaction Log Tailing (CDC)", "Debezium / Kafka Connect tails PostgreSQL WAL or MySQL binlog directly into Kafka", "Sub-millisecond latency, zero DB application query overhead, guaranteed linear order; requires Kafka Connect infra"],
+        ],
+      },
       {
         t: "code",
         lang: "python",
         title: "Transactional outbox: writing to DB and Kafka atomically",
         code: `# Problem: INSERT order in Postgres + publish event to Kafka
-# cannot be one atomic operation. Crash between them = ghost.
+# cannot be one atomic operation across network boundaries.
 
-# Solution: same-DB transaction writes both.
+# Solution: write business state AND outbox event in ONE database transaction.
 with db.transaction():
-    db.execute("INSERT INTO orders ...")
+    db.execute("INSERT INTO orders (id, user_id, amount) VALUES (%s, %s, %s)", order_id, user_id, total)
     db.execute(
-        "INSERT INTO outbox (topic, key, payload) VALUES (%s,%s,%s)",
-        "orders.events", order.user_id, json.dumps(event),
+        "INSERT INTO outbox (topic, event_key, payload, created_at) VALUES (%s, %s, %s, NOW())",
+        "orders.events", user_id, json.dumps(event_payload),
     )
 
-# A separate relay (Debezium CDC or poller) publishes outbox rows
-# to Kafka and marks them sent. At-least-once + idempotent consumers
-# = the exactly-once illusion, done honestly.`,
+# A separate relay (Debezium CDC streaming DB WAL, or an outbox poller)
+# relays events from outbox table to Kafka with at-least-once guarantees.
+# Combined with consumer-side idempotency = bulletproof distributed integrity.`,
       },
       {
         t: "list",

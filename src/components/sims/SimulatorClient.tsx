@@ -58,9 +58,19 @@ export function SimulatorClient() {
       ? Math.min(0.92, 0.05 + (Math.max(apiUtil, dbUtil) - 1) * 0.55)
       : Math.max(0, apiUtil - 0.85) * 0.15 + (redisDown ? 0.005 : 0.001);
 
+  const [tabVisible, setTabVisible] = useState(true);
+
+  useEffect(() => {
+    const handleVis = () => {
+      setTabVisible(!document.hidden);
+    };
+    document.addEventListener("visibilitychange", handleVis);
+    return () => document.removeEventListener("visibilitychange", handleVis);
+  }, []);
+
   /* ---- cascade tick ---- */
   useEffect(() => {
-    if (!running) return;
+    if (!running || !tabVisible) return;
     const iv = setInterval(() => {
       setSim((s) => {
         // retry storm dynamics
@@ -84,7 +94,7 @@ export function SimulatorClient() {
     }, 420);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, rps, dbCap, effHit, apiUtil, dbUtil, p99, errRate, missLoad, redisDown]);
+  }, [running, tabVisible, rps, dbCap, effHit, apiUtil, dbUtil, p99, errRate, missLoad, redisDown]);
 
   function push(msg: string, tone: "info" | "warn" | "err" | "ok") {
     setLog((l) => [...l.slice(-30), { t: ts(), msg, tone }]);
@@ -218,14 +228,14 @@ export function SimulatorClient() {
 
         {/* metrics + trace + log */}
         <div className="min-w-0 space-y-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-4">
             <Stat label="Effective load" value={fmtCompact(sim.load)} sub={`offered ${fmtCompact(rps)}`} tone={sim.retryMult > 1.1 ? "danger" : "neutral"} />
             <Stat label="p99 latency" value={fmtMs(p99)} tone={p99 > 800 ? "danger" : p99 > 300 ? "warn" : "ok"} />
             <Stat label="Error rate" value={`${(errRate * 100).toFixed(1)}%`} tone={errRate > 0.05 ? "danger" : errRate > 0.01 ? "warn" : "ok"} />
             <Stat label="DB utilization" value={`${Math.min(999, dbUtil * 100).toFixed(0)}%`} tone={dbUtil > 0.9 ? "danger" : dbUtil > 0.7 ? "warn" : "ok"} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-line bg-surface p-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-line bg-surface p-3 xs:grid-cols-2 sm:grid-cols-4">
             <MetricCol label="p99 latency" data={hist.lat} color="#2563EB" />
             <MetricCol label="error rate" data={hist.err} max={1} color="#DC2626" />
             <MetricCol label="db QPS" data={hist.db} color="#7C3AED" threshold={dbCap} />
@@ -234,18 +244,18 @@ export function SimulatorClient() {
 
           {trace && (
             <div className="animate-fadeUp rounded-xl border border-accent-border bg-accent-soft/40 p-4">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono text-xs font-semibold text-accent-ink">TRACE {trace.id}</span>
                 <span className="font-mono text-2xs text-ink-mute">
                   total {trace.steps.reduce((a, s) => a + s.ms, 0).toFixed(1)}ms
                 </span>
               </div>
-              <ol className="space-y-1.5">
+              <ol className="space-y-2">
                 {trace.steps.map((s, i) => (
-                  <li key={i} className="flex items-baseline gap-3 font-mono text-2xs">
-                    <span className="w-28 shrink-0 text-right text-ink-faint">{i === 0 ? "" : "+"}{s.ms}ms</span>
-                    <span className={cn("w-36 shrink-0", s.bad ? "text-warn-ink" : "text-ink")}>{s.label}</span>
-                    <span className="text-ink-mute">{s.note}</span>
+                  <li key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-2xs">
+                    <span className="w-20 shrink-0 text-left text-ink-faint sm:w-24 sm:text-right">{i === 0 ? "" : "+"}{s.ms}ms</span>
+                    <span className={cn("font-medium", s.bad ? "text-warn-ink" : "text-ink")}>{s.label}</span>
+                    <span className="w-full text-ink-mute sm:w-auto">{s.note}</span>
                   </li>
                 ))}
               </ol>

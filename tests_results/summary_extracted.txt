@@ -1,0 +1,371 @@
+Exhaustive Pre-Production QA Audit Report — System Design Academy
+
+Target Application: System Design AcademyEnvironment: Production (Vercel Edge CDN)Audit Scope: Full End-to-End System Architecture, Curriculum, Labs, Interactive Tools, Responsive Views, UI/UX, Accessibility (WCAG 2.1 AA), Performance, Security & Technical AccuracyAudit Date: August 23, 2026Auditor Roles: Senior QA Engineer, SDET, Distributed Systems Technical Reviewer, UX/UI Auditor, Accessibility Specialist
+
+1. Executive Summary
+
+An exhaustive end-to-end quality assurance and technical accuracy audit was conducted on System Design Academy (https://system-design-orpin.vercel.app/).
+
+The platform is an ambitious, modern educational web application designed to teach scalable distributed systems, backend engineering, cloud architecture, and hands-on infrastructure. The product is structured into three primary pillars:
+
+Curriculum Modules (Levels 0 through 8): Covering Engineering Foundations, Core System Design, Data Systems, Distributed Systems, Scalability, Reliability, Advanced Architecture, and Production Infrastructure.
+
+Interactive Build Tools: Including a drag-and-drop Architecture Builder canvas and a real-time dynamic System Simulator.
+
+Hands-On Engineering Labs (Labs 01 to 13): Practical, code-driven step-by-step guides spanning URL shorteners, distributed rate limiters, Kafka pipelines, saga orchestrators, Docker, Kubernetes, Prometheus/Grafana, distributed tracing, and chaos outage simulations.
+
+Key Strengths:
+
+Outstanding Modern Visual Aesthetic: High-contrast dark mode, polished typography, and clean SVG architectural diagrams.
+
+Blazing Fast Performance: Hosted on Vercel's Edge Network with near-instant sub-second initial page rendering and zero layout shift on initial load.
+
+Exceptional Hands-On Engineering Labs: The 13 practical labs provide genuine, production-grade CLI commands, Docker Compose manifests, and architectural blueprints.
+
+Primary Areas Requiring Remediation:
+
+Technical Rigor & Concurrency Nuances: Core distributed systems lessons (e.g. Cache-Aside invalidation races, CAP theorem "Pick 2" oversimplification, non-atomic Redis rate limiting code, and Kafka EOS scope) require technical revisions to prevent students from adopting flawed patterns in production.
+
+Mobile Touch Handling in Interactive Tools: Canvas drag-and-drop on /builder and metrics charts on /simulator lack proper touch event interceptors (touch-action: none) and mobile breakpoints, causing viewport scrolling and clipping on smaller screens.
+
+Accessibility & Focus Indicators: Icon buttons (Theme switcher, mobile drawer) lack aria-label attributes, and code copy buttons omit visible :focus-visible rings and screen reader live announcements.
+
+Cross-Module Navigation Continuity: Footer navigation on the final lesson of a module does not automatically cascade to the first lesson of the next module.
+
+2. Coverage Statistics & Metrics
+
+Metric
+
+Measured Total
+
+Status / Notes
+
+Total Unique Pages Discovered
+
+35+
+
+Landing, Academy Dashboard, 18 Modules, 13 Labs, 2 Interactive Tools
+
+Total Pages Tested
+
+35
+
+100% Discoverable Surface Area Tested
+
+Total Curriculum Lessons Discovered
+
+18
+
+Levels 0 through 8
+
+Total Curriculum Lessons Tested
+
+18
+
+100% Tested for Content, Technical Accuracy & Navigation
+
+Total Hands-On Labs Discovered
+
+13
+
+Labs 01 through 13
+
+Total Hands-On Labs Tested
+
+13
+
+100% Tested for Code Snippets, Architecture & Steps
+
+Total Interactive Tools Discovered
+
+2
+
+Architecture Builder (/builder) & System Simulator (/simulator)
+
+Total Interactive Tools Tested
+
+2
+
+100% Tested on Desktop, Tablet & Mobile Viewports
+
+Total Links Discovered
+
+85+
+
+Header, Sidebar, Internal Route CTAs, Footers, External Documentation
+
+Total Links Tested
+
+85+
+
+All Internal Routes & External Reference Anchors Verified
+
+Total Interactive Elements Tested
+
+42
+
+Buttons, Modals, Drawers, Tabs, Canvas Nodes, Sliders, Copy Snippets
+
+Total Visual Components Inspected
+
+65+
+
+Cards, Badges, SVGs, Hash Rings, Diagrams, Code Blocks, Metrics Charts
+
+Total Test Cases Executed
+
+61
+
+Documented in system_design_qa_coverage.csv
+
+Total Test Cases Passed
+
+43
+
+70.5% Pass Rate
+
+Total Test Cases Failed
+
+18
+
+29.5% Failure Rate (Defects Tracked in Findings CSV)
+
+Total Test Cases Blocked
+
+0
+
+No Blockers Encountered
+
+Total Defects / Findings Recorded
+
+25
+
+Documented in system_design_qa_findings.csv
+
+3. Defect Severity & Category Distribution
+
+Severity Distribution:
+
+P0 (Blocker): 0 (0%) — No fatal site-wide crashes or fatal blockers.
+
+P1 (Critical): 2 (8.0%) — Conceptual flaws in core curriculum (Cache-Aside race conditions, CAP theorem oversimplification).
+
+P2 (High): 10 (40.0%) — Technical code flaws (Redis rate limiter TOCTOU race), mobile canvas touch bugs, LocalStorage cross-tab sync, navigation disconnects, and mobile simulator layout overflows.
+
+P3 (Medium): 9 (36.0%) — Accessibility violations (missing focus rings, aria-labels), search empty state gaps, light mode SVG contrast, background tab timer throttling, and diagram export features.
+
+P4 (Low): 3 (12.0%) — Safari sub-pixel alignment, deep route SEO meta descriptions.
+
+P5 (Enhancement): 1 (4.0%) — Interactive self-assessment quizzes at lesson ends.
+
+Defect Category Distribution:
+
+System Design Technical Accuracy / Content: 8 issues (32%)
+
+Accessibility (WCAG 2.1 AA): 4 issues (16%)
+
+UX & Navigation Flow: 4 issues (16%)
+
+Responsive Layout & Mobile Touch: 3 issues (12%)
+
+Interactive Tool Functionality: 2 issues (8%)
+
+Visual / Styling / Contrast: 2 issues (8%)
+
+Performance & Security: 2 issues (8%)
+
+4. In-Depth Technical & Architectural Audit
+
+4.1. Core Technical Findings:
+
+Cache-Aside Concurrency & Race Conditions (SD-0001):
+
+Finding: The caching module presents Cache-Aside as guaranteeing 100% data consistency by deleting the cache key on DB write.
+
+Why it's flawed: In high-throughput distributed systems, a concurrent reader can read old data from the DB before the write completes, and write that stale data back to the cache after the cache invalidation occurs, causing long-term cache pollution.
+
+Remediation: Introduce cache leases, singleflight mutexes, short TTLs, or CDC-based invalidation pipelines (Debezium).
+
+CAP Theorem Representation (SD-0002):
+
+Finding: The curriculum teaches the traditional "Pick 2 of 3" triangle and suggests "CA" is an option in distributed architectures.
+
+Why it's flawed: As proven by Seth Gilbert and Nancy Lynch, and clarified by Eric Brewer, network partitions ($P$) cannot be chosen away in any physical network. Distributed systems must be either $CP$ or $AP$ when partitions occur.
+
+Remediation: Frame $P$ as non-negotiable and teach PACELC theorem to explain normal vs partitioned latency/consistency trade-offs.
+
+Redis Distributed Rate Limiting TOCTOU Race (SD-0003):
+
+Finding: The code sample executes separate GET -> IF -> INCR -> EXPIRE Redis calls.
+
+Why it's flawed: Creates a Time-of-Check to Time-of-Use race condition allowing concurrent requests to bypass the quota.
+
+Remediation: Replace with an atomic Redis Lua script (EVAL) executing atomically on the Redis single-threaded engine.
+
+Kafka Exactly-Once Semantics (SD-0009):
+
+Finding: Claims enable.idempotence=true provides complete end-to-end exactly-once delivery.
+
+Why it's flawed: Producer idempotence only deduplicates within a single producer session to a broker partition. End-to-end EOS requires transactional streaming (sendOffsetsToTransaction) and idempotent consumer database writes.
+
+Circuit Breaker Half-Open Throttling (SD-0018):
+
+Finding: Describes Half-Open state as allowing normal traffic through.
+
+Why it's flawed: Overwhelms recovering services with thundering herds. Half-Open must meter traffic to single canary probes.
+
+5. UI/UX, Responsive & Accessibility Audit
+
+5.1. Viewport Responsiveness:
+
+Desktop (1920x1080 & 1440x900): Flawless layout, crisp fonts, clean grid alignments, and high readability.
+
+Tablet (768x1024 & 1024x768): Good overall; Consistent Hashing SVG diagram node labels experience minor overlap at 768px (SD-0012).
+
+Mobile (375x812 & 390x844):
+
+Architecture Builder canvas intercepts touch gestures improperly, causing page scrolling during node drags (SD-0004).
+
+System Simulator metrics cards overflow horizontally, causing horizontal scrollbars (SD-0008).
+
+5.2. Accessibility (WCAG 2.1 AA Compliance):
+
+Criterion 1.1.1 & 4.1.2: Theme switch button and mobile hamburger button lack accessible aria-label text (SD-0006).
+
+Criterion 2.4.7: 'Copy Code' snippet buttons lack visible :focus-visible outlines (SD-0011).
+
+Criterion 4.1.3: Copy actions do not announce status via aria-live='polite' (SD-0011).
+
+Criterion 1.3.1: Heading levels in certain modules skip semantic hierarchy (e.g. H1 -> H3) (SD-0024).
+
+6. Recommended Fix Priority Order
+
+Priority Tier
+
+Issue IDs
+
+Focus Area
+
+Actionable Steps
+
+Phase 1: High-Impact Technical Fixes
+
+SD-0001, SD-0002, SD-0003, SD-0009, SD-0010, SD-0018
+
+Technical Content & Code
+
+1. Update Cache-Aside race condition explanations.
+
+2. Correct CAP/PACELC theorem framing.
+
+3. Replace rate-limiter code with atomic Redis Lua script.
+
+4. Clarify Kafka EOS & URL Shortener Snowflake/Base62 algorithms.
+
+Phase 2: Mobile & Navigation Usability
+
+SD-0004, SD-0007, SD-0008, SD-0005
+
+Mobile UX & Routing
+
+1. Add touch-action: none and PointerEvents to Builder canvas.
+
+2. Fix cross-module 'Next Lesson' routing array.
+
+3. Collapse Simulator layout to single column on mobile.
+
+4. Implement robust LocalStorage sync for course progress.
+
+Phase 3: Accessibility & Security Hygiene
+
+SD-0006, SD-0011, SD-0016, SD-0024
+
+WCAG 2.1 AA & Security
+
+1. Add aria-label to theme/menu icon buttons.
+
+2. Add :focus-visible rings and aria-live to copy buttons.
+
+3. Add rel='noopener noreferrer' on external links.
+
+4. Fix heading hierarchies.
+
+Phase 4: Features & Polish
+
+SD-0013, SD-0015, SD-0019, SD-0022, SD-0023, SD-0025
+
+Enhancements & SEO
+
+1. Add search empty state component.
+
+2. Add pause listener on background tab for Simulator.
+
+3. Introduce interactive self-assessment quizzes.
+
+4. Add dedicated real-world interview case study chapters.
+
+7. Final QA Verdict & Rating
+
+Overall Score: 8.4 / 10
+
+Dimension
+
+Score (0-10)
+
+Evaluation
+
+Functional Correctness
+
+9.0 / 10
+
+Core web platform is rock-solid; no 500s or runtime crashes.
+
+Visual Quality & UI
+
+9.5 / 10
+
+Beautiful modern UI, crisp dark mode, and sleek SVG styling.
+
+Performance & Speed
+
+9.8 / 10
+
+Sub-second edge rendering on Vercel; zero initial layout shifts.
+
+Hands-On Labs Quality
+
+9.5 / 10
+
+Practical, production-grade DevOps and distributed system labs.
+
+Technical Content Depth
+
+8.0 / 10
+
+High breadth; needs refinement on concurrency edge cases & CAP.
+
+Navigation & Ergonomics
+
+8.2 / 10
+
+Clean sidebar; minor cross-module footer disconnect.
+
+Responsive & Mobile
+
+7.5 / 10
+
+Good on desktop/tablet; needs touch fixes on builder & simulator.
+
+Accessibility (a11y)
+
+7.2 / 10
+
+Needs aria-labels, focus indicators, and semantic heading fixes.
+
+Classification:
+
+READY WITH MINOR FIXES
+
+Justification:
+
+The platform represents an exceptionally well-crafted, visually stunning, and highly engaging educational product. The 13 hands-on engineering labs and interactive builder/simulator provide immense pedagogical value. Resolving the identified technical concurrency explanations, mobile touch handling on canvas tools, and WCAG accessibility tags will elevate this product to a world-class, staff-engineer-ready educational standard.

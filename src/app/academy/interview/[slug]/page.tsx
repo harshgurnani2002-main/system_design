@@ -11,7 +11,21 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const q = INTERVIEW_QUESTIONS.find((x) => x.slug === slug);
-  return q ? { title: `Design: ${q.title}` } : { title: "Interview" };
+  if (!q) return { title: "Interview Problem" };
+  return {
+    title: `${q.title} (${q.difficulty}) — System Design Interview`,
+    description: `${q.summary} — Complete 40-minute system design interview guide with requirements, capacity calculations, architecture, and failure handling.`,
+    openGraph: {
+      title: `${q.title} | System Design Academy`,
+      description: q.summary,
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: q.title,
+      description: q.summary,
+    },
+  };
 }
 
 export default async function InterviewQuestionPage({ params }: { params: Promise<{ slug: string }> }) {

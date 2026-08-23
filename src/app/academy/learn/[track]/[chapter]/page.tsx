@@ -21,7 +21,23 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { track, chapter } = await params;
   const ch = getChapter(track, chapter);
-  return ch ? { title: ch.title, description: ch.subtitle } : { title: "Chapter" };
+  const t = getTrack(track);
+  if (!ch) return { title: "Chapter" };
+
+  return {
+    title: `${ch.title} — ${t?.name ?? "Curriculum"}`,
+    description: `${ch.subtitle} — ${ch.minutes} min lesson covering ${ch.concepts.slice(0, 4).join(", ")}.`,
+    openGraph: {
+      title: `${ch.title} | System Design Academy`,
+      description: ch.subtitle,
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: ch.title,
+      description: ch.subtitle,
+    },
+  };
 }
 
 export default async function ChapterPage({
@@ -42,6 +58,7 @@ export default async function ChapterPage({
   // flat curriculum navigation across tracks
   const flat = TRACKS.flatMap((tr) => trackChapters(tr.slug));
   const flatIdx = flat.findIndex((c) => c.track === track && c.slug === chapter);
+  const flatPrev = flatIdx > 0 ? flat[flatIdx - 1] : null;
   const flatNext = flatIdx >= 0 && flatIdx < flat.length - 1 ? flat[flatIdx + 1] : null;
 
   return (
@@ -81,13 +98,19 @@ export default async function ChapterPage({
         quiz={ch.quiz}
         exercise={ch.exercise ?? null}
         concepts={ch.concepts}
-        prev={prev ? { title: prev.title, href: `/academy/learn/${prev.track}/${prev.slug}` } : null}
+        prev={
+          prev
+            ? { title: prev.title, href: `/academy/learn/${prev.track}/${prev.slug}` }
+            : flatPrev
+              ? { title: `${flatPrev.title} (${flatPrev.track})`, href: `/academy/learn/${flatPrev.track}/${flatPrev.slug}` }
+              : null
+        }
         next={
           next
             ? { title: next.title, href: `/academy/learn/${next.track}/${next.slug}` }
             : flatNext
-              ? { title: flatNext.title, href: `/academy/learn/${flatNext.track}/${flatNext.slug}` }
-              : { title: "Architecture Builder", href: "/academy/builder" }
+              ? { title: `${flatNext.title} (${flatNext.track})`, href: `/academy/learn/${flatNext.track}/${flatNext.slug}` }
+              : { title: "Case Studies & Real-World Systems", href: "/academy/case-studies" }
         }
       />
     </div>
