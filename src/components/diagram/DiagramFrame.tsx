@@ -15,10 +15,12 @@ import { ArchCanvas, DiagramLegend } from "@/components/diagram/ArchCanvas";
 import type { Graph, NodeInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { graphBBox } from "./ArchCanvas";
+
 export function DiagramFrame({
   title,
   graph,
-  height = 380,
+  height,
   maxHeight,
   className,
   showLegend = true,
@@ -34,6 +36,12 @@ export function DiagramFrame({
 }) {
   const [paused, setPaused] = useState(defaultPaused);
   const [selected, setSelected] = useState<string | null>(null);
+
+  const bb = useMemo(() => graphBBox(graph), [graph]);
+  const computedHeight = useMemo(() => {
+    if (height) return height;
+    return Math.min(520, Math.max(420, Math.round(bb.h * 0.85)));
+  }, [height, bb.h]);
 
   const selNode = useMemo(() => graph.nodes.find((n) => n.id === selected) ?? null, [graph.nodes, selected]);
 
@@ -61,7 +69,7 @@ export function DiagramFrame({
       <ArchCanvas
         graph={graph}
         mode="explore"
-        height={height}
+        height={computedHeight}
         maxHeight={maxHeight}
         selectedId={selected}
         onSelectNode={setSelected}

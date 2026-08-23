@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { CaseStudy } from "@/lib/caseTypes";
 import { DiagramFrame } from "@/components/diagram/DiagramFrame";
@@ -24,8 +24,22 @@ const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-export function SystemClient({ cs }: { cs: CaseStudy }) {
-  const [tab, setTab] = useState<Tab>("Overview");
+export function SystemClient({ cs, initialTab }: { cs: CaseStudy; initialTab?: string }) {
+  const normTab = (TABS as readonly string[]).includes(initialTab || "")
+    ? (initialTab as Tab)
+    : "Overview";
+  const [tab, setTab] = useState<Tab>(normTab);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      const t = p.get("tab") as Tab;
+      if (t && (TABS as readonly string[]).includes(t)) {
+        setTab(t);
+      }
+    }
+  }, []);
+
   const { completeChapter, completedChapters } = useProgress();
   const done = !!completedChapters[`system-${cs.slug}`];
   const idx = TABS.indexOf(tab);

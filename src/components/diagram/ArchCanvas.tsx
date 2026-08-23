@@ -34,35 +34,67 @@ import {
 import type { DiagramEdge, DiagramFlow, DiagramNode, Graph, NodeKind, NodeInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export const NODE_W = 148;
-export const NODE_H = 46;
-export const NODE_H_SUB = 58;
+export const NODE_W = 154;
+export const NODE_H = 48;
+export const NODE_H_SUB = 60;
 
 /** Smallest allowed render scale — keeps node labels ≥ ~10px real pixels. */
-const MIN_SCALE = 0.84;
-const MAX_SCALE = 1.18;
+const MIN_SCALE = 0.88;
+const MAX_SCALE = 1.25;
 
 /* ------------------------------------------------------------------ */
-/*  Geometry helpers                                                   */
+/*  Geometry & sizing helpers                                          */
 /* ------------------------------------------------------------------ */
 
-export function nodeH(n: DiagramNode) {
+export function nodeW(n: DiagramNode): number {
+  if (n.w && n.w > 0) return n.w;
+  const labelChars = n.label ? n.label.length : 0;
+  const subChars = n.sub ? n.sub.length : 0;
+  const hasBadge = n.state === "down" || n.state === "warn" || n.state === "hot";
+
+  const labelWidth = labelChars * 7.5 + (hasBadge ? 58 : 38);
+  const subWidth = subChars ? subChars * 5.8 + (hasBadge ? 56 : 38) : 0;
+  const needed = Math.max(labelWidth, subWidth);
+
+  return Math.max(NODE_W, Math.min(220, Math.ceil(needed)));
+}
+
+export function nodeH(n: DiagramNode): number {
   return n.sub ? NODE_H_SUB : NODE_H;
 }
 
 export function graphBBox(graph: Graph) {
-  const pad = 30;
+  const pad = 42;
+  if (!graph.nodes || graph.nodes.length === 0) {
+    return { x: 0, y: 0, w: 800, h: 300 };
+  }
+
   const xs = graph.nodes.map((n) => n.x);
   const ys = graph.nodes.map((n) => n.y);
-  const xe = graph.nodes.map((n) => n.x + (n.w ?? NODE_W));
+  const xe = graph.nodes.map((n) => n.x + nodeW(n));
   const ye = graph.nodes.map((n) => n.y + nodeH(n));
-  const x = Math.min(...xs) - pad;
-  const y = Math.min(...ys) - pad;
+
+  if (graph.regions && graph.regions.length > 0) {
+    graph.regions.forEach((r) => {
+      xs.push(r.x);
+      ys.push(r.y);
+      xe.push(r.x + r.w);
+      ye.push(r.y + r.h);
+    });
+  }
+
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xe);
+  const maxY = Math.max(...ye);
+
+  const x = minX - pad;
+  const y = minY - pad;
   return {
     x,
     y,
-    w: Math.max(...xe) - x + pad,
-    h: Math.max(...ye) - y + pad,
+    w: Math.max(240, maxX - minX + pad * 2),
+    h: Math.max(160, maxY - minY + pad * 2),
   };
 }
 
@@ -71,34 +103,177 @@ interface Pt {
   y: number;
 }
 
-function anchor(a: DiagramNode, b: DiagramNode): [Pt, Pt] {
-  const aw = a.w ?? NODE_W;
-  const bw = b.w ?? NODE_W;
-  const acx = a.x + aw / 2;
-  const bcx = b.x + bw / 2;
-  const acy = a.y + nodeH(a) / 2;
-  const bcy = b.y + nodeH(b) / 2;
-  const dx = bcx - acx;
-  const dy = bcy - acy;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0
-      ? [{ x: a.x + aw, y: acy }, { x: b.x, y: bcy }]
-      : [{ x: a.x, y: acy }, { x: b.x + bw, y: bcy }];
-  }
-  return dy >= 0
-    ? [{ x: acx, y: a.y + nodeH(a) }, { x: bcx, y: b.y }]
-    : [{ x: acx, y: a.y }, { x: bcx, y: b.y + nodeH(b) }];
+type Face = "top" | "bottom" | "left" | "right";
+
+interface AnchorResult {
+  p1: Pt;
+  p2: Pt;
+  face1: Face;
+  face2: Face;
 }
 
-function edgePath(a: DiagramNode, b: DiagramNode): { d: string; mid: Pt } {
-  const [p1, p2] = anchor(a, b);
-  const mx = (p1.x + p2.x) / 2;
-  const my = (p1.y + p2.y) / 2;
-  const horizontal = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y);
-  const d = horizontal
-    ? `M ${p1.x} ${p1.y} C ${mx} ${p1.y}, ${mx} ${p2.y}, ${p2.x} ${p2.y}`
-    : `M ${p1.x} ${p1.y} C ${p1.x} ${my}, ${p2.x} ${my}, ${p2.x} ${p2.y}`;
-  return { d, mid: { x: mx, y: my } };
+function anchor(a: DiagramNode, b: DiagramNode): AnchorResult {
+  const aw = nodeW(a);
+  const bw = nodeW(b);
+  const ah = nodeH(a);
+  const bh = nodeH(b);
+
+  const acx = a.x + aw / 2;
+  const bcx = b.x + bw / 2;
+  const acy = a.y + ah / 2;
+  const bcy = b.y + bh / 2;
+
+  const dx = bcx - acx;
+  const dy = bcy - acy;
+
+  // Clear horizontal separation
+  if (b.x >= a.x + aw - 12) {
+    return {
+      p1: { x: a.x + aw, y: acy },
+      p2: { x: b.x, y: bcy },
+      face1: "right",
+      face2: "left",
+    };
+  }
+  if (a.x >= b.x + bw - 12) {
+    return {
+      p1: { x: a.x, y: acy },
+      p2: { x: b.x + bw, y: bcy },
+      face1: "left",
+      face2: "right",
+    };
+  }
+
+  // Mostly vertical alignment or stacked
+  if (Math.abs(dx) < Math.max(aw, bw) * 0.75 || Math.abs(dy) > Math.abs(dx) * 1.1) {
+    if (dy >= 0) {
+      return {
+        p1: { x: acx, y: a.y + ah },
+        p2: { x: bcx, y: b.y },
+        face1: "bottom",
+        face2: "top",
+      };
+    } else {
+      return {
+        p1: { x: acx, y: a.y },
+        p2: { x: bcx, y: b.y + bh },
+        face1: "top",
+        face2: "bottom",
+      };
+    }
+  }
+
+  // Fallback to dominant axis
+  if (dx >= 0) {
+    return {
+      p1: { x: a.x + aw, y: acy },
+      p2: { x: b.x, y: bcy },
+      face1: "right",
+      face2: "left",
+    };
+  } else {
+    return {
+      p1: { x: a.x, y: acy },
+      p2: { x: b.x + bw, y: bcy },
+      face1: "left",
+      face2: "right",
+    };
+  }
+}
+
+/** Cubic Bezier calculation at parameter t */
+function bezierPoint(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt {
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const mt3 = mt2 * mt;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return {
+    x: mt3 * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t3 * p3.x,
+    y: mt3 * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t3 * p3.y,
+  };
+}
+
+function edgePath(
+  a: DiagramNode,
+  b: DiagramNode,
+  allNodes?: DiagramNode[]
+): { d: string; mid: Pt } {
+  const { p1, p2, face1, face2 } = anchor(a, b);
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const dist = Math.hypot(dx, dy);
+
+  let cp1: Pt;
+  let cp2: Pt;
+
+  const curvature = Math.min(Math.max(dist * 0.4, 28), 160);
+
+  if (face1 === "right" && face2 === "left") {
+    cp1 = { x: p1.x + curvature, y: p1.y };
+    cp2 = { x: p2.x - curvature, y: p2.y };
+  } else if (face1 === "left" && face2 === "right") {
+    cp1 = { x: p1.x - curvature, y: p1.y };
+    cp2 = { x: p2.x + curvature, y: p2.y };
+  } else if (face1 === "bottom" && face2 === "top") {
+    cp1 = { x: p1.x, y: p1.y + curvature };
+    cp2 = { x: p2.x, y: p2.y - curvature };
+  } else if (face1 === "top" && face2 === "bottom") {
+    cp1 = { x: p1.x, y: p1.y - curvature };
+    cp2 = { x: p2.x, y: p2.y + curvature };
+  } else if (face1 === "right" && face2 === "top") {
+    cp1 = { x: p1.x + curvature, y: p1.y };
+    cp2 = { x: p2.x, y: p2.y - curvature };
+  } else if (face1 === "right" && face2 === "bottom") {
+    cp1 = { x: p1.x + curvature, y: p1.y };
+    cp2 = { x: p2.x, y: p2.y + curvature };
+  } else if (face1 === "bottom" && face2 === "left") {
+    cp1 = { x: p1.x, y: p1.y + curvature };
+    cp2 = { x: p2.x - curvature, y: p2.y };
+  } else {
+    cp1 = { x: p1.x + dx * 0.4, y: p1.y + dy * 0.1 };
+    cp2 = { x: p2.x - dx * 0.4, y: p2.y - dy * 0.1 };
+  }
+
+  const d = `M ${p1.x} ${p1.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${p2.x} ${p2.y}`;
+
+  // Find candidate midpoint on bezier
+  let bestT = 0.5;
+  let mid = bezierPoint(p1, cp1, cp2, p2, bestT);
+
+  // Check collision against intermediate nodes
+  if (allNodes && allNodes.length > 0) {
+    const isColliding = (pt: Pt) => {
+      for (const n of allNodes) {
+        if (n.id === a.id || n.id === b.id) continue;
+        const nw = nodeW(n);
+        const nh = nodeH(n);
+        if (
+          pt.x >= n.x - 14 &&
+          pt.x <= n.x + nw + 14 &&
+          pt.y >= n.y - 12 &&
+          pt.y <= n.y + nh + 12
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    if (isColliding(mid)) {
+      const midA = bezierPoint(p1, cp1, cp2, p2, 0.3);
+      const midB = bezierPoint(p1, cp1, cp2, p2, 0.7);
+      if (!isColliding(midA)) {
+        mid = midA;
+      } else if (!isColliding(midB)) {
+        mid = midB;
+      } else {
+        mid = { x: mid.x, y: mid.y - 28 };
+      }
+    }
+  }
+
+  return { d, mid };
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,12 +347,17 @@ function usePrefersReducedMotion() {
 /*  Edge rendering                                                     */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Edge rendering                                                     */
+/* ------------------------------------------------------------------ */
+
 const EDGE_STROKE = "#A1A1AA";
 
 function EdgeEl({
   edge,
   a,
   b,
+  allNodes,
   animated,
   selected,
   highlighted,
@@ -188,6 +368,7 @@ function EdgeEl({
   edge: DiagramEdge;
   a: DiagramNode;
   b: DiagramNode;
+  allNodes?: DiagramNode[];
   animated?: boolean;
   selected?: boolean;
   highlighted?: boolean;
@@ -195,44 +376,79 @@ function EdgeEl({
   ids: { arrow: string; arrowSel: string };
   onClick?: () => void;
 }) {
-  const { d, mid } = useMemo(() => edgePath(a, b), [a, b]);
+  const { d, mid } = useMemo(() => edgePath(a, b, allNodes), [a, b, allNodes]);
   const color = selected || highlighted ? "#2563EB" : EDGE_STROKE;
+  const labelText = edge.label ?? edge.protocol;
+  const hasLatency = !!edge.latency;
+
+  const pillWidth = useMemo(() => {
+    if (!labelText) return 0;
+    const len = labelText.length;
+    return Math.max(36, Math.round(len * 6.8 + 18));
+  }, [labelText]);
+
+  const pillHeight = hasLatency ? 30 : 18;
+
   return (
-    <g opacity={dimmed ? 0.25 : 1}>
+    <g opacity={dimmed ? 0.22 : 1}>
       {onClick && (
-        <path d={d} stroke="transparent" strokeWidth={14} fill="none" className="cursor-pointer" onClick={onClick} />
+        <path
+          d={d}
+          stroke="transparent"
+          strokeWidth={16}
+          fill="none"
+          className="cursor-pointer"
+          onClick={onClick}
+        />
       )}
       <path
         d={d}
         stroke={color}
-        strokeWidth={selected ? 2.25 : 1.5}
+        strokeWidth={selected ? 2.25 : highlighted ? 2 : 1.5}
         fill="none"
         strokeDasharray={edge.dashed ? "5 5" : animated ? "6 8" : undefined}
         className={animated ? "animate-dashflow" : undefined}
-        markerEnd={`url(#${selected ? ids.arrowSel : ids.arrow})`}
+        markerEnd={`url(#${selected || highlighted ? ids.arrowSel : ids.arrow})`}
       />
-      {(edge.label || edge.protocol) && (
+      {labelText && (
         <g transform={`translate(${mid.x}, ${mid.y})`}>
+          {/* Background Badge Pill */}
           <rect
-            x={-((edge.label?.length ?? edge.protocol!.length) * 3.1 + 7)}
-            y={-9}
-            width={(edge.label?.length ?? edge.protocol!.length) * 6.2 + 14}
-            height={17}
-            rx={8}
-            fill="#FAFAF9"
-            stroke="#E4E4E7"
+            x={-pillWidth / 2}
+            y={-pillHeight / 2}
+            width={pillWidth}
+            height={pillHeight}
+            rx={pillHeight / 2}
+            fill="#FFFFFF"
+            stroke={selected || highlighted ? "#93C5FD" : "#E4E4E7"}
+            strokeWidth={1}
+            filter="drop-shadow(0 1px 2px rgba(0,0,0,0.06))"
           />
+          {/* Label Text */}
           <text
+            x={0}
+            y={hasLatency ? -4 : 0}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={10}
+            fontSize={9.8}
+            fontWeight={500}
             fontFamily="var(--font-mono)"
-            fill="#52525B"
+            fill={selected || highlighted ? "#1D4ED8" : "#3F3F46"}
           >
-            {edge.label ?? edge.protocol}
+            {labelText}
           </text>
-          {edge.latency && (
-            <text textAnchor="middle" y={17} fontSize={8.5} fontFamily="var(--font-mono)" fill="#A1A1AA">
+          {/* Latency sub-badge */}
+          {hasLatency && (
+            <text
+              x={0}
+              y={7}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={8.2}
+              fontWeight={600}
+              fontFamily="var(--font-mono)"
+              fill="#2563EB"
+            >
               {edge.latency}
             </text>
           )}
@@ -298,8 +514,8 @@ function KindGlyph({ kind }: { kind: NodeKind }) {
 function statusVisual(n: DiagramNode) {
   switch (n.state) {
     case "down": return { border: "#DC2626", bg: "#FEF2F2", badge: "✕" };
-    case "hot": return { border: "#EA580C", bg: undefined, badge: "" };
-    case "warn": return { border: "#D97706", bg: undefined, badge: "" };
+    case "hot": return { border: "#EA580C", bg: "#FFF7ED", badge: "!" };
+    case "warn": return { border: "#D97706", bg: "#FFFBEB", badge: "⚠" };
     default: return null;
   }
 }
@@ -333,7 +549,7 @@ function NodeEl({
   onLeave?: () => void;
   onClick?: () => void;
 }) {
-  const w = n.w ?? NODE_W;
+  const w = nodeW(n);
   const h = nodeH(n);
   const s = KIND_STYLE[n.kind];
   const sv = statusVisual(n);
@@ -341,10 +557,17 @@ function NodeEl({
   const bgColor = sv?.bg ?? s.bg;
   const info = libInfo(n);
 
+  // Dynamic font sizing for long labels
+  const labelLen = n.label.length;
+  const labelFontSize = labelLen > 22 ? 11.0 : labelLen > 16 ? 11.8 : 12.5;
+
+  const subLen = n.sub ? n.sub.length : 0;
+  const subFontSize = subLen > 24 ? 8.8 : 9.4;
+
   return (
     <g
       transform={`translate(${n.x}, ${n.y})`}
-      opacity={dimmed ? 0.28 : 1}
+      opacity={dimmed ? 0.25 : 1}
       style={{ cursor: interactive ? "pointer" : undefined }}
       onPointerDown={onPointerDown}
       onPointerEnter={onEnter}
@@ -365,58 +588,89 @@ function NodeEl({
           : undefined
       }
     >
-      {/* invisible fat hit area */}
+      {/* Fat hit area */}
       {interactive && <rect x={-6} y={-6} width={w + 12} height={h + 12} fill="transparent" />}
       {highlighted && (
-        <rect x={-4} y={-4} width={w + 8} height={h + 8} rx={14} fill="none" stroke="#2563EB" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.85} />
+        <rect
+          x={-4}
+          y={-4}
+          width={w + 8}
+          height={h + 8}
+          rx={14}
+          fill="none"
+          stroke="#2563EB"
+          strokeWidth={1.75}
+          strokeDasharray="4 3"
+          opacity={0.9}
+        />
       )}
+      {/* Node Box */}
       <rect
         width={w}
         height={h}
-        rx={11}
+        rx={10}
         fill={bgColor}
         stroke={borderColor}
-        strokeWidth={selected ? 2 : 1.25}
+        strokeWidth={selected ? 2.25 : 1.35}
         filter={hovered && !selected ? `url(#${ids.lift})` : selected ? `url(#${ids.glow})` : undefined}
       />
-      {/* status indicator — separate visual channel from the icon glyph */}
+      {/* Status indicator badge */}
       {n.state === "down" || n.state === "warn" || n.state === "hot" ? (
-        <g transform={`translate(${w - 22}, 6)`}>
-          <circle cx={9} cy={9} r={7.5} fill={n.state === "down" ? "#DC2626" : n.state === "hot" ? "#EA580C" : "#D97706"} />
+        <g transform={`translate(${w - 20}, 7)`}>
+          <circle
+            cx={7}
+            cy={7}
+            r={6.5}
+            fill={n.state === "down" ? "#DC2626" : n.state === "hot" ? "#EA580C" : "#D97706"}
+          />
           {n.state === "down" ? (
-            <text x={9} y={12.2} textAnchor="middle" fontSize={9} fontWeight={700} fill="#fff">✕</text>
+            <text x={7} y={9.8} textAnchor="middle" fontSize={8} fontWeight={800} fill="#fff">
+              ✕
+            </text>
           ) : (
-            <animate attributeName="opacity" values="1;0.45;1" dur="1.2s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0.4;1" dur="1.2s" repeatCount="indefinite" />
           )}
         </g>
       ) : null}
-      <g transform={`translate(13, ${h / 2 - (n.sub ? 13 : 8)})`} aria-hidden>
+      {/* Kind icon glyph */}
+      <g transform={`translate(12, ${h / 2 - (n.sub ? 13 : 7)})`} aria-hidden>
         <KindGlyph kind={n.kind} />
       </g>
+      {/* Node Label — Full Text, never cut off */}
       <text
         x={33}
-        y={n.sub ? h / 2 - 6 : h / 2 + 1}
-        fontSize={12.5}
+        y={n.sub ? h / 2 - 5 : h / 2 + 1}
+        dominantBaseline={n.sub ? undefined : "central"}
+        fontSize={labelFontSize}
         fontWeight={600}
         fontFamily="var(--font-sans)"
         fill={sv?.border === "#DC2626" ? "#991B1B" : s.text}
         style={{ textDecoration: n.state === "down" ? "line-through" : undefined }}
       >
-        {n.label.length > 18 ? n.label.slice(0, 17) + "…" : n.label}
+        {n.label}
       </text>
+      {/* Node Subtitle — Full Subtitle */}
       {n.sub && (
-        <text x={33} y={h / 2 + 11} fontSize={9.5} fontFamily="var(--font-mono)" fill="#71717A">
-          {n.sub.length > 21 ? n.sub.slice(0, 20) + "…" : n.sub}
+        <text
+          x={33}
+          y={h / 2 + 11}
+          fontSize={subFontSize}
+          fontWeight={500}
+          fontFamily="var(--font-mono)"
+          fill="#52525B"
+        >
+          {n.sub}
         </text>
       )}
+      {/* Edit Mode connector handle */}
       {onHandleDown && !linking && (
         <circle
           cx={w}
           cy={h / 2}
-          r={6}
+          r={6.5}
           fill="#fff"
-          stroke="#A1A1AA"
-          strokeWidth={1.25}
+          stroke="#71717A"
+          strokeWidth={1.5}
           onPointerDown={(e) => {
             e.stopPropagation();
             onHandleDown(e);
@@ -424,27 +678,26 @@ function NodeEl({
           data-handle="true"
         />
       )}
-      {linking && <circle cx={w} cy={h / 2} r={6} fill="#2563EB" />}
+      {linking && <circle cx={w} cy={h / 2} r={6.5} fill="#2563EB" />}
     </g>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  SVG-native hover tooltip (scales with the diagram, no DOM overlay) */
+/*  SVG-native hover tooltip                                           */
 /* ------------------------------------------------------------------ */
 
 function NodeTooltip({ n, bb }: { n: DiagramNode; bb: { x: number; y: number; w: number; h: number } }) {
   const info = libInfo(n);
   if (!info) return null;
-  const w = n.w ?? NODE_W;
+  const w = nodeW(n);
   const cx = n.x + w / 2;
-  const tw = 210;
+  const tw = 220;
   const lines: string[] = [];
-  // naive wrap at ~34 chars
   const words = info.purpose.split(" ");
   let cur = "";
   for (const word of words) {
-    if ((cur + " " + word).trim().length > 36) {
+    if ((cur + " " + word).trim().length > 34) {
       lines.push(cur.trim());
       cur = word;
     } else cur += " " + word;
@@ -453,13 +706,13 @@ function NodeTooltip({ n, bb }: { n: DiagramNode; bb: { x: number; y: number; w:
   const th = 26 + lines.length * 13 + (info.latency ? 16 : 0) + 8;
   const above = n.y - bb.y > th + 18;
   const ty = above ? n.y - th - 12 : n.y + nodeH(n) + 12;
-  let tx = Math.min(Math.max(cx - tw / 2, bb.x + 4), bb.x + bb.w - tw - 4);
+  let tx = Math.min(Math.max(cx - tw / 2, bb.x + 6), bb.x + bb.w - tw - 6);
 
   return (
     <g pointerEvents="none">
-      <rect x={tx} y={ty} width={tw} height={th} rx={9} fill="#18181B" opacity={0.96} />
+      <rect x={tx} y={ty} width={tw} height={th} rx={9} fill="#18181B" opacity={0.96} filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))" />
       <path d={`M ${cx - 5} ${above ? ty + th : ty} l 5 ${above ? 5 : -5} l 5 ${above ? -5 : 5} z`} fill="#18181B" />
-      <text x={tx + 12} y={ty + 17} fontSize={10.5} fontWeight={700} fontFamily="var(--font-sans)" fill="#fff">
+      <text x={tx + 12} y={ty + 17} fontSize={11} fontWeight={700} fontFamily="var(--font-sans)" fill="#fff">
         {n.label}
       </text>
       {info.latency && (
@@ -477,12 +730,12 @@ function NodeTooltip({ n, bb }: { n: DiagramNode; bb: { x: number; y: number; w:
 }
 
 /* ------------------------------------------------------------------ */
-/*  Packet animation layer — rAF-driven, zero React re-renders          */
+/*  Packet animation layer                                             */
 /* ------------------------------------------------------------------ */
 
 interface WaypointPath {
   pts: Pt[];
-  cum: number[]; // cumulative length
+  cum: number[];
   total: number;
 }
 
@@ -491,7 +744,7 @@ function buildWaypoints(flow: DiagramFlow, nodeMap: Map<string, DiagramNode>): W
   for (const id of flow.path) {
     const n = nodeMap.get(id);
     if (!n) return null;
-    pts.push({ x: n.x + (n.w ?? NODE_W) / 2, y: n.y + nodeH(n) / 2 });
+    pts.push({ x: n.x + nodeW(n) / 2, y: n.y + nodeH(n) / 2 });
   }
   if (pts.length < 2) return null;
   const cum = [0];
@@ -542,7 +795,6 @@ function PacketLayer({
           progress[i] = (progress[i] + ((flow.speed ?? 240) * dt) / wp.total) % 1;
         }
         const dist = progress[i] * wp.total;
-        // find segment
         let seg = 0;
         while (seg < wp.cum.length - 2 && wp.cum[seg + 1] < dist) seg++;
         const t = (dist - wp.cum[seg]) / Math.max(0.0001, wp.cum[seg + 1] - wp.cum[seg]);
@@ -568,7 +820,7 @@ function PacketLayer({
           ref={(el) => {
             circleRefs.current[idx++] = el;
           }}
-          r={4.2}
+          r={4.5}
           fill={colorFor(flow)}
           opacity={paused ? 0.35 : 0.95}
         >
@@ -594,13 +846,25 @@ function ZoomControls({
   onZoomOut: () => void;
   onReset: () => void;
 }) {
-  const btn = "flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface text-ink-mute transition-colors hover:border-accent hover:text-accent";
+  const btn = "flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface text-ink-mute transition-colors hover:border-accent hover:text-accent font-mono text-xs";
   return (
-    <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg border border-line bg-surface/90 p-1 shadow-node backdrop-blur-sm" role="group" aria-label="Diagram zoom controls">
-      <button className={btn} onClick={onZoomOut} aria-label="Zoom out">−</button>
-      <span className="tabular w-10 text-center font-mono text-2xs text-ink-faint">{Math.round(k * 100)}%</span>
-      <button className={btn} onClick={onZoomIn} aria-label="Zoom in">+</button>
-      <button className={btn} onClick={onReset} aria-label="Reset view" title="Fit to screen">⌂</button>
+    <div
+      className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur-sm z-10"
+      role="group"
+      aria-label="Diagram zoom controls"
+    >
+      <button className={btn} onClick={onZoomOut} aria-label="Zoom out" title="Zoom out">
+        −
+      </button>
+      <span className="tabular w-11 text-center font-mono text-2xs text-ink-faint">
+        {Math.round(k * 100)}%
+      </span>
+      <button className={btn} onClick={onZoomIn} aria-label="Zoom in" title="Zoom in">
+        +
+      </button>
+      <button className={btn} onClick={onReset} aria-label="Fit to screen" title="Fit to screen">
+        ⌂
+      </button>
     </div>
   );
 }
@@ -676,12 +940,30 @@ export function ArchCanvas({
   const exploring = mode === "explore";
   const reduced = usePrefersReducedMotion();
   const [hoverId, setHoverId] = useState<string | null>(null);
-  const [view, setView] = useState({ x: 60, y: 40, k: 1 });
+
+  const bb = useMemo(() => graphBBox(graph), [graph]);
+
+  const initialView = useMemo(() => {
+    if (!exploring) return { x: 40, y: 30, k: 1 };
+    const estW = 860;
+    const estH = height ?? 440;
+    const scaleX = estW / bb.w;
+    const scaleY = estH / bb.h;
+    const k = Math.min(Math.max(Math.min(scaleX, scaleY) * 0.92, 0.45), 1.15);
+    return {
+      k,
+      x: (estW - bb.w * k) / 2 - bb.x * k,
+      y: (estH - bb.h * k) / 2 - bb.y * k,
+    };
+  }, [exploring, bb, height]);
+
+  const [view, setView] = useState(initialView);
 
   /* ---- measured responsive scaling for static mode ---- */
   const [containerW, setContainerW] = useState(0);
+  const [containerH, setContainerH] = useState(0);
+
   useLayoutEffect(() => {
-    if (editing) return;
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
@@ -691,17 +973,13 @@ export function ArchCanvas({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [editing]);
-  const [containerH, setContainerH] = useState(0);
-
-  const bb = useMemo(() => (graph.nodes.length ? graphBBox(graph) : { x: 0, y: 0, w: 800, h: 260 }), [graph]);
+  }, []);
 
   const staticScale = useMemo(() => {
-    if (editing) return 1;
-    // SSR / pre-measurement: assume the readability floor — closest to final size
+    if (editing || exploring) return 1;
     if (containerW === 0) return MIN_SCALE;
     return Math.min(MAX_SCALE, Math.max(MIN_SCALE, containerW / bb.w));
-  }, [editing, containerW, bb]);
+  }, [editing, exploring, containerW, bb]);
 
   const svgPx = editing || exploring ? null : Math.round(bb.w * staticScale);
   const svgPy = editing || exploring ? null : Math.round(bb.h * staticScale);
@@ -716,17 +994,18 @@ export function ArchCanvas({
   >(null);
   const [ghost, setGhost] = useState<Pt | null>(null);
   const [linkFrom, setLinkFrom] = useState<string | null>(null);
+  const interactedRef = useRef(false);
 
   const nodeMap = useMemo(() => {
     const m = new Map<string, DiagramNode>();
-    graph.nodes.forEach((n) => m.set(n.id, n));
+    (graph.nodes ?? []).forEach((n) => m.set(n.id, n));
     return m;
   }, [graph.nodes]);
 
   /* neighbor sets for focus dimming */
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>();
-    for (const e of graph.edges) {
+    for (const e of graph.edges ?? []) {
       if (!m.has(e.from)) m.set(e.from, new Set());
       if (!m.has(e.to)) m.set(e.to, new Set());
       m.get(e.from)!.add(e.to);
@@ -817,13 +1096,12 @@ export function ArchCanvas({
     if (!el || !(editing || exploring)) return;
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey && editing === false && exploring) {
-        // allow natural page scroll unless zoom intent; still support pinch (ctrlKey)
         if (!e.ctrlKey) return;
       }
       e.preventDefault();
       interactedRef.current = true;
       setView((v) => {
-        const k = Math.min(2.4, Math.max(0.35, v.k * (e.deltaY > 0 ? 0.92 : 1.08)));
+        const k = Math.min(2.5, Math.max(0.35, v.k * (e.deltaY > 0 ? 0.92 : 1.08)));
         const rect = el.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
@@ -834,33 +1112,36 @@ export function ArchCanvas({
     return () => el.removeEventListener("wheel", onWheel);
   }, [editing, exploring]);
 
-  /* fit-to-content transform for explore mode */
-  const interactedRef = useRef(false);
   const zoomBy = (factor: number) => {
     interactedRef.current = true;
     setView((v) => {
-      const k = Math.min(2.4, Math.max(0.35, v.k * factor));
+      const k = Math.min(2.5, Math.max(0.35, v.k * factor));
       return { ...v, k };
     });
   };
 
   /* fit-to-content transform for explore mode */
   const fitView = useCallback(() => {
-    if (!bb || graph.nodes.length === 0) return;
+    if (!bb || (graph.nodes ?? []).length === 0) return;
     const el = wrapRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const k = Math.min(Math.max(Math.min(rect.width / bb.w, rect.height / bb.h), 0.35), 1.6);
+    const rect = el ? el.getBoundingClientRect() : null;
+    const targetW = rect && rect.width > 0 ? rect.width : (containerW > 0 ? containerW : 860);
+    const targetH = rect && rect.height > 0 ? rect.height : (containerH > 0 ? containerH : (height ?? 440));
+
+    const scaleX = targetW / bb.w;
+    const scaleY = targetH / bb.h;
+    const optimalScale = Math.min(scaleX, scaleY);
+    const k = Math.min(Math.max(optimalScale * 0.93, 0.42), 1.18);
+
     setView({
       k,
-      x: (rect.width - bb.w * k) / 2 - bb.x * k,
-      y: (rect.height - bb.h * k) / 2 - bb.y * k,
+      x: (targetW - bb.w * k) / 2 - bb.x * k,
+      y: (targetH - bb.h * k) / 2 - bb.y * k,
     });
-  }, [bb, graph.nodes.length]);
+  }, [bb, graph.nodes, containerW, containerH, height]);
 
-  // auto-fit once on mount (explore only) — until the user interacts
   useEffect(() => {
-    if (!exploring || containerW === 0 || containerH === 0) return;
+    if (!exploring) return;
     if (!interactedRef.current) fitView();
   }, [exploring, containerW, containerH, fitView]);
 
@@ -874,7 +1155,7 @@ export function ArchCanvas({
     const from = nodeMap.get(linkFrom);
     if (!from) return null;
     const p = toCanvas(ghost.x, ghost.y);
-    const start = { x: from.x + (from.w ?? NODE_W), y: from.y + nodeH(from) / 2 };
+    const start = { x: from.x + nodeW(from), y: from.y + nodeH(from) / 2 };
     return { d: `M ${start.x} ${start.y} L ${p.x} ${p.y}` };
   }, [linkFrom, ghost, nodeMap, toCanvas]);
 
@@ -890,7 +1171,9 @@ export function ArchCanvas({
   const effectiveDim =
     dimExcept ??
     (focusOnSelect && selectedId
-      ? graph.nodes.map((n) => n.id).filter((id) => id === selectedId || neighbors.get(selectedId)?.has(id))
+      ? (graph.nodes ?? [])
+          .map((n) => n.id)
+          .filter((id) => id === selectedId || neighbors.get(selectedId)?.has(id))
       : null);
 
   const flowsEnabled = packets && !!graph.flows?.length;
@@ -899,14 +1182,31 @@ export function ArchCanvas({
     <>
       {graph.regions?.map((r) => (
         <g key={r.id}>
-          <rect x={r.x} y={r.y} width={r.w} height={r.h} rx={14} fill="#FAFAF9" stroke="#E4E4E7" strokeDasharray="6 5" />
-          <text x={r.x + 12} y={r.y + 18} fontSize={10} fontWeight={600} fontFamily="var(--font-mono)" fill="#A1A1AA" letterSpacing={1}>
+          <rect
+            x={r.x}
+            y={r.y}
+            width={r.w}
+            height={r.h}
+            rx={14}
+            fill="#FAFAF9"
+            stroke="#E4E4E7"
+            strokeDasharray="6 5"
+          />
+          <text
+            x={r.x + 14}
+            y={r.y + 20}
+            fontSize={10.5}
+            fontWeight={600}
+            fontFamily="var(--font-mono)"
+            fill="#A1A1AA"
+            letterSpacing={1.2}
+          >
             {r.label.toUpperCase()}
           </text>
         </g>
       ))}
 
-      {graph.edges.map((e, i) => {
+      {(graph.edges ?? []).map((e, i) => {
         const a = nodeMap.get(e.from);
         const b = nodeMap.get(e.to);
         if (!a || !b) return null;
@@ -918,6 +1218,7 @@ export function ArchCanvas({
             edge={e}
             a={a}
             b={b}
+            allNodes={graph.nodes}
             animated={flowing}
             highlighted={isHl}
             selected={selectedEdge === i}
@@ -938,9 +1239,9 @@ export function ArchCanvas({
         />
       )}
 
-      {graph.nodes.map((n) => {
+      {(graph.nodes ?? []).map((n) => {
         const isSel = selectedId === n.id;
-        const isNb = selectedId ? (neighbors.get(selectedId)?.has(n.id) ?? false) : false;
+        const isNb = selectedId ? neighbors.get(selectedId)?.has(n.id) ?? false : false;
         return (
           <NodeEl
             key={n.id}
@@ -989,7 +1290,7 @@ export function ArchCanvas({
         ref={svgRef}
         className={cn("block select-none", editing || exploring ? "h-full w-full touch-none" : "max-w-none")}
         role="img"
-        aria-label={graph.nodes.length ? `Architecture diagram with ${graph.nodes.length} components` : "Empty diagram"}
+        aria-label={(graph.nodes ?? []).length ? `Architecture diagram with ${(graph.nodes ?? []).length} components` : "Empty diagram"}
         width={editing || exploring ? undefined : (svgPx ?? undefined)}
         height={editing || exploring ? undefined : (svgPy ?? undefined)}
         style={
@@ -1006,17 +1307,33 @@ export function ArchCanvas({
         onPointerDown={onSvgPointerDown}
       >
         <defs>
-          <marker id={ids.arrow} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker
+            id={ids.arrow}
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
             <path d="M0 1.5 L9 5 L0 8.5 z" fill={EDGE_STROKE} />
           </marker>
-          <marker id={ids.arrowSel} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker
+            id={ids.arrowSel}
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
             <path d="M0 1.5 L9 5 L0 8.5 z" fill="#2563EB" />
           </marker>
           <filter id={ids.glow} x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#2563EB" floodOpacity="0.35" />
+            <feDropShadow dx="0" dy="0" stdDeviation="3.5" floodColor="#2563EB" floodOpacity="0.38" />
           </filter>
           <filter id={ids.lift} x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#18181B" floodOpacity="0.16" />
+            <feDropShadow dx="0" dy="2" stdDeviation="3.5" floodColor="#18181B" floodOpacity="0.14" />
           </filter>
         </defs>
 
@@ -1027,16 +1344,16 @@ export function ArchCanvas({
         )}
       </svg>
 
-      {(editing || exploring) && graph.nodes.length > 0 && (
+      {(editing || exploring) && (graph.nodes ?? []).length > 0 && (
         <ZoomControls k={view.k} onZoomIn={() => zoomBy(1.18)} onZoomOut={() => zoomBy(0.85)} onReset={resetView} />
       )}
 
       {/* minimap for edit mode */}
-      {editing && graph.nodes.length > 0 && <Minimap graph={graph} view={view} />}
+      {editing && (graph.nodes ?? []).length > 0 && <Minimap graph={graph} view={view} />}
 
-      {/* scroll affordance when readability floor exceeds container */}
+      {/* scroll affordance */}
       {overflowing && (
-        <div className="pointer-events-none absolute right-2 top-2 rounded-md border border-line bg-surface/90 px-2 py-1 font-mono text-2xs text-ink-faint shadow-node">
+        <div className="pointer-events-none absolute right-2 top-2 rounded-md border border-line bg-surface/95 px-2 py-1 font-mono text-2xs text-ink-faint shadow-node">
           scroll →
         </div>
       )}
@@ -1050,9 +1367,9 @@ function Minimap({ graph, view }: { graph: Graph; view: { x: number; y: number; 
   const H = 88;
   const s = Math.min(W / bb.w, H / bb.h);
   return (
-    <div className="absolute bottom-3 right-3 rounded-lg border border-line bg-surface/95 p-1.5 shadow-node backdrop-blur-sm" aria-hidden>
+    <div className="absolute bottom-3 right-3 rounded-lg border border-line bg-surface/95 p-1.5 shadow-pop backdrop-blur-sm" aria-hidden>
       <svg width={W} height={H}>
-        {graph.edges.map((e, i) => {
+        {(graph.edges ?? []).map((e, i) => {
           const a = graph.nodes.find((n) => n.id === e.from);
           const b = graph.nodes.find((n) => n.id === e.to);
           if (!a || !b) return null;
@@ -1068,12 +1385,12 @@ function Minimap({ graph, view }: { graph: Graph; view: { x: number; y: number; 
             />
           );
         })}
-        {graph.nodes.map((n) => (
+        {(graph.nodes ?? []).map((n) => (
           <rect
             key={n.id}
             x={(n.x - bb.x) * s + 4}
             y={(n.y - bb.y) * s + 4}
-            width={(n.w ?? NODE_W) * s}
+            width={nodeW(n) * s}
             height={nodeH(n) * s}
             rx={2}
             fill={KIND_STYLE[n.kind].dot}
@@ -1114,16 +1431,23 @@ export function DiagramLegend({ kinds }: { kinds?: NodeKind[] }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
       {items.map((k) => (
         <span key={k} className="inline-flex items-center gap-1.5 text-2xs text-ink-mute">
-          <span className="h-2.5 w-2.5 rounded-[3px] border" style={{ background: KIND_STYLE[k].bg, borderColor: KIND_STYLE[k].border }} />
+          <span
+            className="h-2.5 w-2.5 rounded-[3px] border"
+            style={{ background: KIND_STYLE[k].bg, borderColor: KIND_STYLE[k].border }}
+          />
           {labels[k]}
         </span>
       ))}
       <span className="inline-flex items-center gap-1.5 text-2xs text-ink-mute">
-        <svg width="26" height="8" aria-hidden><line x1="0" y1="4" x2="26" y2="4" stroke="#A1A1AA" strokeWidth="1.5" /></svg>
+        <svg width="26" height="8" aria-hidden>
+          <line x1="0" y1="4" x2="26" y2="4" stroke="#A1A1AA" strokeWidth="1.5" />
+        </svg>
         sync request
       </span>
       <span className="inline-flex items-center gap-1.5 text-2xs text-ink-mute">
-        <svg width="26" height="8" aria-hidden><line x1="0" y1="4" x2="26" y2="4" stroke="#A1A1AA" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
+        <svg width="26" height="8" aria-hidden>
+          <line x1="0" y1="4" x2="26" y2="4" stroke="#A1A1AA" strokeWidth="1.5" strokeDasharray="4 3" />
+        </svg>
         async event
       </span>
     </div>

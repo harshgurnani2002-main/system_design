@@ -14,8 +14,15 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return cs ? { title: `${cs.name} — case study`, description: cs.tagline } : { title: "Case study" };
 }
 
-export default async function SystemPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function SystemPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ tab?: string }>;
+}) {
   const { slug } = await params;
+  const sp = searchParams ? await searchParams : {};
   const cs = getSystem(slug);
   if (!cs) notFound();
 
@@ -25,7 +32,7 @@ export default async function SystemPage({ params }: { params: Promise<{ slug: s
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 md:px-6">
-      <SystemClient cs={cs} />
+      <SystemClient cs={cs} initialTab={sp.tab} />
 
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6">
         {prev ? (
