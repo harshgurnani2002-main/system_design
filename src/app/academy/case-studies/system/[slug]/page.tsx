@@ -11,7 +11,21 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const cs = getSystem(slug);
-  return cs ? { title: `${cs.name} — case study`, description: cs.tagline } : { title: "Case study" };
+  if (!cs) return { title: "System Architecture Case Study" };
+  return {
+    title: `${cs.name} System Architecture (${cs.difficulty}) — Case Study`,
+    description: `${cs.tagline} — Complete end-to-end architecture blueprint with capacity estimation, interactive topologies, and failure drills.`,
+    openGraph: {
+      title: `${cs.name} System Design | System Design Academy`,
+      description: cs.tagline,
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${cs.name} Architecture`,
+      description: cs.tagline,
+    },
+  };
 }
 
 export default async function SystemPage({

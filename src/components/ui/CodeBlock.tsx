@@ -44,10 +44,13 @@ export function CodeBlock({
         </div>
         <button
           onClick={copy}
-          aria-label={copied ? "Copied" : "Copy code"}
-          className="rounded-md px-2 py-1 font-mono text-2xs text-ink-mute transition-colors hover:bg-zinc-200/60 hover:text-ink"
+          aria-label={copied ? "Code copied to clipboard" : `Copy ${title ?? lang ?? "code"} snippet`}
+          className="rounded-md px-2 py-1 font-mono text-2xs text-ink-mute transition-colors hover:bg-zinc-200/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
         >
           {copied ? "copied ✓" : "copy"}
+          <span className="sr-only" aria-live="polite">
+            {copied ? "Code successfully copied to clipboard" : ""}
+          </span>
         </button>
       </div>
       <pre className="overflow-x-auto p-4 text-[0.8125rem] leading-relaxed">

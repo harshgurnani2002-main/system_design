@@ -568,7 +568,7 @@ function NodeEl({
     <g
       transform={`translate(${n.x}, ${n.y})`}
       opacity={dimmed ? 0.25 : 1}
-      style={{ cursor: interactive ? "pointer" : undefined }}
+      style={{ cursor: interactive ? "pointer" : undefined, touchAction: interactive ? "none" : undefined }}
       onPointerDown={onPointerDown}
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
@@ -1044,6 +1044,7 @@ export function ArchCanvas({
     onSelectEdge?.(null);
     const p = toCanvas(e.clientX, e.clientY);
     drag.current = { type: "node", id: n.id, dx: p.x - n.x, dy: p.y - n.y };
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   };
 
   const onHandleDown = (n: DiagramNode) => (e: React.PointerEvent) => {
@@ -1052,6 +1053,7 @@ export function ArchCanvas({
     drag.current = { type: "link", from: n.id };
     setLinkFrom(n.id);
     setGhost({ x: e.clientX, y: e.clientY });
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   };
 
   useEffect(() => {

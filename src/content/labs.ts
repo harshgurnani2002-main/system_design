@@ -30,13 +30,28 @@ export const LABS: Lab[] = [
     ),
     instructions: [
       { step: "Scaffold", detail: "FastAPI app with POST /shorten and GET /{code}. Add a Compose file with Postgres + Redis." },
-      { step: "Schema", detail: "urls(id BIGSERIAL, code TEXT UNIQUE, long_url TEXT, created_at). Index code — it's your only lookup path." },
-      { step: "Encoding", detail: "Generate random 7-char base62; retry on UNIQUE violation. Log collision rate (it'll be ~0)." },
-      { step: "Idempotency", detail: "Accept optional Idempotency-Key header; store key→response in Redis for 24h; replay on repeat." },
-      { step: "Cache-aside redirects", detail: "Redis GET code → miss → DB → SETEX 86400±jitter. Negative-cache missing codes 60s." },
-      { step: "Analytics async", detail: "On redirect, INCR clicks:{code} in Redis; background task flushes to DB every 30s batched." },
+      { step: "Schema", detail: "urls(id BIGINT PRIMARY KEY, code VARCHAR(10) UNIQUE, long_url TEXT, created_at TIMESTAMPTZ). Index code as primary lookup path." },
+      { step: "Collision-Free Encoding", detail: "Generate unique 64-bit IDs using a distributed generator (Twitter Snowflake or PostgreSQL sequence range per worker); convert the integer ID to Base62 string (0-9, a-z, A-Z). Unlike MD5 slicing (which hits Birthday Paradox collisions after ~1.8M keys), sequence-to-Base62 is guaranteed 100% collision-free." },
+      { step: "Idempotency", detail: "Accept optional Idempotency-Key header; store key→response in Redis for 24h; replay original short URL on duplicate submission." },
+      { step: "Cache-aside redirects", detail: "Redis GET url:{code} → miss → DB → SETEX 86400±jitter. Negative-cache missing codes 60s." },
+      { step: "Analytics async", detail: "On redirect, INCR clicks:{code} in Redis; background worker flushes batched counter updates to DB every 30s." },
     ],
     code: [
+      {
+        title: "Base62 integer encoder (collision-free)",
+        lang: "python",
+        code: `BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+def encode_base62(num: int) -> str:
+    """Converts a 64-bit integer (e.g. from Snowflake/DB sequence) to Base62."""
+    if num == 0:
+        return BASE62_ALPHABET[0]
+    digits = []
+    while num > 0:
+        num, rem = divmod(num, 62)
+        digits.append(BASE62_ALPHABET[rem])
+    return "".join(reversed(digits))  # e.g., 10000000000 -> 'aUKY8'`,
+      },
       {
         title: "redirect with cache-aside",
         lang: "python",

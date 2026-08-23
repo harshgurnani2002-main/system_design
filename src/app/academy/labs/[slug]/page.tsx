@@ -14,7 +14,21 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const lab = LABS.find((l) => l.slug === slug);
-  return lab ? { title: `Lab ${lab.num}: ${lab.title}` } : { title: "Lab" };
+  if (!lab) return { title: "Engineering Lab" };
+  return {
+    title: `Lab ${String(lab.num).padStart(2, "0")}: ${lab.title} — System Design Academy`,
+    description: `${lab.objective} — Practical ${lab.minutes} min distributed systems lab.`,
+    openGraph: {
+      title: `Lab ${lab.num}: ${lab.title} | System Design Academy`,
+      description: lab.objective,
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `Lab ${lab.num}: ${lab.title}`,
+      description: lab.objective,
+    },
+  };
 }
 
 export default async function LabPage({ params }: { params: Promise<{ slug: string }> }) {

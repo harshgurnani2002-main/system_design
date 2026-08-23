@@ -365,21 +365,37 @@ server {
       {
         t: "code",
         lang: "python",
-        title: "Cache-aside, done carefully",
-        code: `def get_user(user_id: str) -> dict:
+        title: "Cache-aside read & write paths with invalidation",
+        code: `# READ PATH
+def get_user(user_id: str) -> dict | None:
     key = f"user:{user_id}"
     cached = redis.get(key)
     if cached:
         return json.loads(cached)
 
+    # Cache miss: fetch from primary/replica
     user = db.query("SELECT * FROM users WHERE id = %s", user_id)
 
     if user is None:
         redis.set(key, "", ex=30)   # negative cache: don't hammer DB for ghosts
         return None
 
-    redis.set(key, json.dumps(user), ex=3600)
-    return user`,
+    # Populate cache with jittered TTL (1 hour ± 10%)
+    ttl = int(3600 * random.uniform(0.9, 1.1))
+    redis.set(key, json.dumps(user), ex=ttl)
+    return user
+
+# WRITE PATH (Always update DB first, then DELETE cache)
+def update_user(user_id: str, data: dict) -> None:
+    db.execute("UPDATE users SET name = %s WHERE id = %s", data["name"], user_id)
+    # Evict cache key: deleting is safer than updating to avoid stale overwrite races
+    redis.delete(f"user:{user_id}")`,
+      },
+      {
+        t: "callout",
+        kind: "danger",
+        title: "The Cache-Aside Concurrency Race (Stale Read Overwrite)",
+        md: "A common interview misconception is that Cache-Aside is 100% consistent. It is only **eventually consistent**, and has a known concurrency race:\n\n1. **Thread 1 (Read)** misses cache, reads DB (`val = 1`).\n2. **Thread 2 (Write)** updates DB (`val = 2`) and deletes the cache key.\n3. **Thread 1 (Read)** finally finishes its slow execution and writes stale `val = 1` back into Redis with a 1-hour TTL.\n\nResult: The cache holds stale data for the entire TTL!\\n\\n**Production Mitigations:**\n* **Cache Lease Tokens (Memcached/Gutter):** On miss, cache issues a 64-bit lease token. Write-back is rejected if an eviction occurred in between.\n* **Single-Flight Coalescing (Go `singleflight` / mutexes):** Only one concurrent DB query per key; subsequent reads wait on the first future.\n* **Monotonic Versioned Keys:** Key includes version or updated_at timestamp (`user:42:v12`). Writes bump version; stale writes to old versions age out harmlessly.\n* **CDC / Debezium Invalidation:** Tail the database WAL to trigger cache evictions asynchronously.",
       },
       { t: "h", text: "Eviction: what leaves when memory is full" },
       {

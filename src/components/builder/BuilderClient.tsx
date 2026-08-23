@@ -322,6 +322,13 @@ function deepCopy(d: Doc): Doc {
 
 export function BuilderClient({ template }: { template?: string }) {
   const initial = useMemo<Doc>(() => {
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#diagram=")) {
+      try {
+        const raw = decodeURIComponent(window.location.hash.slice(9));
+        const parsed = JSON.parse(atob(raw)) as Doc;
+        if (parsed && Array.isArray(parsed.nodes)) return parsed;
+      } catch {}
+    }
     const t = TEMPLATES.find((x) => x.name === template);
     if (t) return deepCopy(t.doc);
     return (
@@ -500,7 +507,7 @@ export function BuilderClient({ template }: { template?: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, deleteSelection, duplicateNode, doc]);
 
-  /* ---------- export ---------- */
+  /* ---------- export & sharing ---------- */
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -510,6 +517,75 @@ export function BuilderClient({ template }: { template?: string }) {
     a.click();
     URL.revokeObjectURL(url);
     flash("Exported architecture.json");
+  };
+
+  const exportSvg = () => {
+    const svg = document.querySelector("svg[role='img']");
+    if (!svg) {
+      flash("Failed to capture diagram SVG");
+      return;
+    }
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(svg);
+    if (!source.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
+      source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    const blob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "architecture.svg";
+    a.click();
+    URL.revokeObjectURL(url);
+    flash("Exported architecture.svg");
+  };
+
+  const exportPng = () => {
+    const svg = document.querySelector("svg[role='img']");
+    if (!svg) {
+      flash("Failed to capture diagram");
+      return;
+    }
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(svg);
+    if (!source.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
+      source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    const img = new Image();
+    const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const bbox = svg.getBoundingClientRect();
+      const scale = 2; // 2x high resolution
+      canvas.width = (bbox.width || 800) * scale;
+      canvas.height = (bbox.height || 500) * scale;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#FAF9F6";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const pngUrl = canvas.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = pngUrl;
+        a.download = "architecture.png";
+        a.click();
+        flash("Exported architecture.png");
+      }
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const copyShareLink = () => {
+    try {
+      const encoded = encodeURIComponent(btoa(JSON.stringify(doc)));
+      const shareUrl = `${window.location.origin}${window.location.pathname}#diagram=${encoded}`;
+      navigator.clipboard?.writeText(shareUrl);
+      flash("Permalink copied to clipboard!");
+    } catch {
+      flash("Failed to copy permalink");
+    }
   };
 
   const findings = useMemo(() => analyze(doc), [doc]);
@@ -533,10 +609,11 @@ export function BuilderClient({ template }: { template?: string }) {
         <span className="mx-1 h-5 w-px bg-line" />
         <Button size="sm" variant="ghost" onClick={() => setTplOpen(true)}>Templates</Button>
         <Button size="sm" variant="ghost" onClick={() => setLibOpen(true)}>Open…</Button>
-        <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard?.writeText(JSON.stringify(doc)); flash("Architecture JSON copied"); }}>
-          Copy JSON
-        </Button>
-        <Button size="sm" variant="ghost" onClick={exportJson}>Export</Button>
+        <Button size="sm" variant="ghost" onClick={copyShareLink}>Share Link</Button>
+        <span className="mx-1 h-5 w-px bg-line" />
+        <Button size="sm" variant="ghost" onClick={exportPng}>PNG</Button>
+        <Button size="sm" variant="ghost" onClick={exportSvg}>SVG</Button>
+        <Button size="sm" variant="ghost" onClick={exportJson}>JSON</Button>
         <span className="mx-1 h-5 w-px bg-line" />
         <Button
           size="sm"

@@ -166,9 +166,9 @@ function TrackItem({
 
 export function Logo({ compact }: { compact?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-white">
-        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+    <span className="inline-flex items-center gap-2.5">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink text-white">
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 block" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
           <rect x="2" y="10" width="5" height="4" rx="1" fill="currentColor" stroke="none" />
           <rect x="9" y="9" width="5" height="5" rx="1" fill="currentColor" opacity="0.55" stroke="none" />
           <path d="M4.5 10V6.5h7V9M8 9v0" strokeLinecap="round" />
@@ -176,7 +176,7 @@ export function Logo({ compact }: { compact?: boolean }) {
         </svg>
       </span>
       {!compact && (
-        <span>
+        <span className="leading-none select-none">
           System Design<span className="text-accent"> Academy</span>
         </span>
       )}
